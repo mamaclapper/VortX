@@ -10,9 +10,11 @@ Where StremioX is headed next. This is a community build with no fixed schedule,
 
 3. **Apple TV Top Shelf.** Surface Continue Watching on the Apple TV home screen, the way the official app does. This one is exploratory: a Top Shelf extension needs a shared app group, which can be awkward to keep working across the kind of re-signing sideloading relies on, so it may not survive every install method.
 
-4. **Player and UI polish.** Subtitles pulled from addons (OpenSubtitles and similar), cleaner empty and error states, and localization.
+4. **Open-source streaming server.** The released IPAs currently bundle Stremio's proprietary `server.js`. Replacing it with an open-source streaming server (for example perpetus/stream-server) would remove the one proprietary piece and let CI build the IPAs end to end. Unproven inside nodejs-mobile on iOS and tvOS, so it needs investigation.
 
-5. **Tests and CI.** A set of characterization tests around the Swift to Rust bridge, and a GitHub Action that builds the IPAs on each release tag.
+5. **Player and UI polish.** Subtitles pulled from addons (OpenSubtitles and similar), cleaner empty and error states, a bundled licenses/acknowledgements screen, and localization.
+
+6. **Tests and CI.** A set of characterization tests around the Swift to Rust bridge, and a GitHub Action that builds the IPAs on each release tag (this becomes possible once the streaming server is open-source, since the proprietary `server.js` cannot live in CI).
 
 ## Done
 
