@@ -8,20 +8,19 @@ Where StremioX is headed next. This is a community build with no fixed schedule,
 
 2. **Live playback progress.** The watched marker already flips near the end of a video, and resume reads from the engine library. What is missing is partial progress mid-watch, which only reaches the engine on the next sync today. Wiring the engine's player model will make Continue Watching update the moment you pause and back out.
 
-3. **Search and Add-ons on the engine (Apple TV).** Search still uses the older Cinemeta client, and the Add-ons screen is read only. Moving both onto the engine will let you install and remove addons inside the app and search across everything you have installed.
+3. **Apple TV Top Shelf.** Surface Continue Watching on the Apple TV home screen, the way the official app does. This one is exploratory: a Top Shelf extension needs a shared app group, which can be awkward to keep working across the kind of re-signing sideloading relies on, so it may not survive every install method.
 
-4. **Apple TV Top Shelf.** Surface Continue Watching on the Apple TV home screen, the way the official app does.
+4. **Player and UI polish.** Subtitles pulled from addons (OpenSubtitles and similar), cleaner empty and error states, and localization.
 
-5. **Keychain for the sign-in token.** It currently lives in UserDefaults. Moving it into the Keychain is a small but worthwhile security upgrade.
-
-6. **Player and UI polish.** Subtitles pulled from addons (OpenSubtitles and similar), cleaner empty and error states, and localization.
-
-7. **Tests and CI.** A set of characterization tests around the Swift to Rust bridge, and a GitHub Action that builds the IPAs on each release tag.
+5. **Tests and CI.** A set of characterization tests around the Swift to Rust bridge, and a GitHub Action that builds the IPAs on each release tag.
 
 ## Done
 
 - Apple TV rebased onto stremio-core: Home, Discover, Library, Detail, and the per-addon stream list.
+- Search across every installed addon, on the engine.
+- Add-ons screen on the engine, with remove for non-default addons.
 - Watched and unwatched markers, with the option to mark by episode, by season, or for a whole series.
 - Engine-sourced resume, and a watched hook near the end of playback.
+- Sign-in token stored in the Keychain, with a one-time migration from the old storage.
 - Sign-in seeds the engine immediately, and sign-out clears it.
 - Both apps shipped as unsigned IPAs in the releases.
