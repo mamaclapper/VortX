@@ -5,81 +5,73 @@ import SwiftUI
 struct LibraryView: View {
     @EnvironmentObject private var core: CoreBridge
     @EnvironmentObject private var account: StremioAccount
-    private let columns = Array(repeating: GridItem(.fixed(220), spacing: 28), count: 6)
+    private let columns = Array(repeating: GridItem(.fixed(kPosterWidth), spacing: Theme.Space.lg), count: 6)
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    Text("Library").font(.system(size: 56, weight: .heavy)).padding(.horizontal, 60)
+                VStack(alignment: .leading, spacing: Theme.Space.md) {
+                    Text("Library").screenTitleStyle().padding(.horizontal, Theme.Space.screenEdge)
                     if let library = core.library {
                         filters(library.selectable)
                         if library.catalog.isEmpty {
-                            hint("No titles here. Add titles to your library in Stremio and they'll show up.")
+                            hint("Your library is empty. Add titles to your library in Stremio and they will show up here.")
                         } else {
                             grid(library.catalog)
                         }
                     } else if account.isSignedIn {
-                        ProgressView().controlSize(.large).padding(60).frame(maxWidth: .infinity)
+                        ProgressView().controlSize(.large).tint(Theme.Palette.accent)
+                            .padding(Theme.Space.xxl).frame(maxWidth: .infinity)
                     } else {
                         CoreEmptyState.signedOut
                     }
                 }
-                .padding(.vertical, 40)
+                .padding(.vertical, Theme.Space.xl)
             }
-            .background(Color.black.ignoresSafeArea())
+            .background(Theme.Palette.canvas.ignoresSafeArea())
         }
         .onAppear { if core.library == nil { core.loadLibrary() } }
     }
 
     private func filters(_ selectable: CoreLibrarySelectable) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 16) {
+                HStack(spacing: Theme.Space.sm) {
                     ForEach(selectable.types) { type in
                         Button { core.selectLibrary(type.request) } label: { Text(type.label) }
                             .buttonStyle(ChipButtonStyle(selected: type.selected))
                     }
                 }
-                .padding(.horizontal, 60).padding(.vertical, 2)
+                .padding(.horizontal, Theme.Space.screenEdge).padding(.vertical, Theme.Space.xs / 2)
             }
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
+                HStack(spacing: Theme.Space.sm) {
                     ForEach(selectable.sorts) { sort in
                         Button { core.selectLibrary(sort.request) } label: { Text(sort.label) }
                             .buttonStyle(ChipButtonStyle(selected: sort.selected))
                     }
                 }
-                .padding(.horizontal, 60).padding(.vertical, 2)
+                .padding(.horizontal, Theme.Space.screenEdge).padding(.vertical, Theme.Space.xs / 2)
             }
         }
     }
 
     private func grid(_ items: [CoreCWItem]) -> some View {
-        LazyVGrid(columns: columns, spacing: 28) {
+        LazyVGrid(columns: columns, spacing: Theme.Space.xl) {
             ForEach(items) { item in
-                VStack(spacing: 12) {
-                    NavigationLink {
-                        DetailView(type: item.type, id: item.id)
-                    } label: {
-                        VStack(spacing: 0) {
-                            CorePoster(item.poster)
-                            if item.progress > 0 {
-                                ProgressView(value: item.progress).tint(.cyan).padding(.top, 6)
-                            }
-                        }
-                    }
-                    .buttonStyle(.card)
-                    Text(item.name).font(.caption).lineLimit(1).truncationMode(.tail)
-                        .foregroundStyle(.secondary).frame(width: 220)
-                }
-                .frame(width: 220)
+                PosterCard(title: item.name, poster: item.poster, type: item.type, id: item.id,
+                           progress: item.progress > 0 ? item.progress : nil)
             }
         }
-        .padding(.horizontal, 60)
+        .padding(.horizontal, Theme.Space.screenEdge).padding(.top, Theme.Space.sm)
     }
 
     private func hint(_ text: String) -> some View {
-        Text(text).font(.title3).foregroundStyle(.secondary).padding(.horizontal, 60)
+        Text(text)
+            .font(Theme.Typography.body)
+            .foregroundStyle(Theme.Palette.textSecondary)
+            .frame(maxWidth: 760, alignment: .leading)
+            .padding(.horizontal, Theme.Space.screenEdge)
+            .padding(.top, Theme.Space.lg)
     }
 }

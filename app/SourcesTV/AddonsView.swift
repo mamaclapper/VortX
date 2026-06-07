@@ -9,47 +9,51 @@ struct AddonsView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    Text("Add-ons").font(.system(size: 56, weight: .heavy))
+                VStack(alignment: .leading, spacing: Theme.Space.lg) {
+                    Text("Add-ons").screenTitleStyle()
                     if !account.isSignedIn {
-                        hint("Sign in (Settings tab) to see your installed add-ons.")
+                        CoreEmptyState.signedOut
                     } else if core.addons.isEmpty {
-                        hint("No add-ons found on your account yet.")
+                        hint("No add-ons found on your account yet. Install them from the Stremio web or mobile app and they will sync down on next launch.")
                     } else {
                         ForEach(core.addons) { addon in addonRow(addon) }
                     }
                 }
-                .padding(60)
+                .padding(.horizontal, Theme.Space.screenEdge)
+                .padding(.vertical, Theme.Space.xl)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .background(Color.black.ignoresSafeArea())
+            .background(Theme.Palette.canvas.ignoresSafeArea())
         }
     }
 
     private func addonRow(_ addon: CoreDescriptor) -> some View {
-        HStack(alignment: .top, spacing: 22) {
+        HStack(alignment: .top, spacing: Theme.Space.md) {
             Image(systemName: addon.providesStreams ? "play.rectangle.on.rectangle.fill" : "puzzlepiece.extension.fill")
-                .font(.system(size: 40)).foregroundStyle(addon.providesStreams ? .cyan : .secondary)
+                .font(.system(size: 36))
+                .foregroundStyle(addon.providesStreams ? Theme.Palette.accent : Theme.Palette.textTertiary)
                 .frame(width: 56)
             VStack(alignment: .leading, spacing: 8) {
-                Text(addon.manifest.name).font(.title3.weight(.semibold))
-                Text(addon.capabilities).font(.callout).foregroundStyle(.secondary)
-                Text(addon.host).font(.caption.monospaced()).foregroundStyle(.secondary.opacity(0.7))
+                Text(addon.manifest.name).font(Theme.Typography.cardTitle).foregroundStyle(Theme.Palette.textPrimary)
+                Text(addon.capabilities).font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
+                Text(addon.host).font(.system(size: 16, design: .monospaced)).foregroundStyle(Theme.Palette.textTertiary)
             }
             Spacer()
             if !addon.isProtected {
-                Button(role: .destructive) { core.uninstallAddon(addon) } label: {
-                    Label("Remove", systemImage: "trash")
-                }
-                .buttonStyle(.bordered)
+                Button { core.uninstallAddon(addon) } label: { Label("Remove", systemImage: "trash") }
+                    .buttonStyle(ChipButtonStyle(selected: true, accent: Theme.Palette.danger, accentText: Theme.Palette.danger))
             }
         }
-        .padding(24)
+        .padding(Theme.Space.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 16))
+        .background(Theme.Palette.surface1, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
     }
 
     private func hint(_ text: String) -> some View {
-        Text(text).font(.title3).foregroundStyle(.secondary)
+        Text(text)
+            .font(Theme.Typography.body)
+            .foregroundStyle(Theme.Palette.textSecondary)
+            .frame(maxWidth: 820, alignment: .leading)
+            .padding(.top, Theme.Space.sm)
     }
 }

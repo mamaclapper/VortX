@@ -1,8 +1,7 @@
 import SwiftUI
 
 /// Native tvOS Home, driven by the **stremio-core** engine (via `CoreBridge`): a "Continue Watching"
-/// rail + every catalog of every installed addon, correct by construction, matching the official app.
-/// Selecting a title opens its detail page (still the legacy meta resolver for now; migrated later).
+/// rail plus every catalog of every installed addon, on the StremioX design system (Theme.swift).
 struct HomeView: View {
     @EnvironmentObject private var core: CoreBridge
     @EnvironmentObject private var account: StremioAccount
@@ -10,7 +9,7 @@ struct HomeView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 48) {
+                LazyVStack(alignment: .leading, spacing: Theme.Space.xl) {
                     header
                     if !core.continueWatching.isEmpty {
                         CoreContinueWatchingRow(items: core.continueWatching)
@@ -19,61 +18,58 @@ struct HomeView: View {
                         CoreCatalogRowView(row: row)
                     }
                     if core.continueWatching.isEmpty && core.boardRows.isEmpty {
-                        if account.isSignedIn { placeholder } else { CoreEmptyState.signedOut }
+                        if account.isSignedIn { LoadingRail() } else { CoreEmptyState.signedOut }
                     }
                 }
-                .padding(.vertical, 40)
+                .padding(.vertical, Theme.Space.xl)
             }
-            .background(Color.black.ignoresSafeArea())
+            .background(Theme.Palette.canvas.ignoresSafeArea())
         }
     }
 
+    /// Serif wordmark, the editorial signature: warm-white "Stremio" with an ember "X".
     private var header: some View {
-        HStack(spacing: 16) {
-            Image(systemName: "play.tv.fill").font(.system(size: 40)).foregroundStyle(.cyan)
-            Text("StremioX").font(.system(size: 52, weight: .heavy))
+        HStack(spacing: 0) {
+            Text("Stremio").foregroundStyle(Theme.Palette.textPrimary)
+            Text("X").foregroundStyle(Theme.Palette.accent)
             Spacer()
         }
-        .padding(.horizontal, 60)
-    }
-
-    private var placeholder: some View {
-        HStack(spacing: 16) {
-            ProgressView()
-            Text("Loading your library and catalogs…").font(.callout).foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 60).padding(.top, 40)
+        .font(Theme.Typography.wordmark)
+        .padding(.horizontal, Theme.Space.screenEdge)
     }
 }
 
-/// "Continue Watching" rail from the engine (`continue_watching_preview`), every in-progress title,
-/// newest first, with a real progress bar.
+/// Eyebrow kicker + section title, the shared header for every rail.
+struct RailHeader: View {
+    var eyebrow: String? = nil
+    let title: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let eyebrow { Text(eyebrow).eyebrowStyle() }
+            Text(title).sectionTitleStyle()
+        }
+        .padding(.horizontal, Theme.Space.screenEdge)
+    }
+}
+
+/// "Continue Watching" rail from the engine (`continue_watching_preview`), newest first, with a
+/// resume-progress stripe on each poster.
 struct CoreContinueWatchingRow: View {
     let items: [CoreCWItem]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Continue Watching").font(.title2.weight(.semibold)).padding(.horizontal, 60)
+        VStack(alignment: .leading, spacing: Theme.Space.md) {
+            RailHeader(eyebrow: "Pick up where you left off", title: "Continue Watching")
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 28) {
+                LazyHStack(alignment: .top, spacing: Theme.Space.lg) {
                     ForEach(items) { item in
-                        VStack(spacing: 12) {
-                            NavigationLink {
-                                DetailView(type: item.type, id: item.id)
-                            } label: {
-                                VStack(spacing: 0) {
-                                    CorePoster(item.poster)
-                                    ProgressView(value: item.progress).tint(.cyan).padding(.top, 6)
-                                }
-                            }
-                            .buttonStyle(.card)
-                            Text(item.name).font(.caption).lineLimit(1).truncationMode(.tail)
-                                .foregroundStyle(.secondary).frame(width: 220)
-                        }
-                        .frame(width: 220)
+                        PosterCard(title: item.name, poster: item.poster,
+                                   type: item.type, id: item.id, progress: item.progress)
                     }
                 }
-                .padding(.horizontal, 60).padding(.vertical, 12)
+                .padding(.horizontal, Theme.Space.screenEdge)
+                .padding(.vertical, Theme.Space.md)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -85,60 +81,38 @@ struct CoreCatalogRowView: View {
     let row: CoreBoardRow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(row.title).font(.title2.weight(.semibold)).padding(.horizontal, 60)
+        VStack(alignment: .leading, spacing: Theme.Space.md) {
+            RailHeader(title: row.title)
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 28) {
+                LazyHStack(alignment: .top, spacing: Theme.Space.lg) {
                     ForEach(row.items) { item in
-                        VStack(spacing: 12) {
-                            NavigationLink {
-                                DetailView(type: item.type, id: item.id)
-                            } label: {
-                                CorePoster(item.poster)
-                            }
-                            .buttonStyle(.card)
-                            Text(item.name).font(.caption).lineLimit(1).truncationMode(.tail)
-                                .foregroundStyle(.secondary).frame(width: 220)
-                        }
-                        .frame(width: 220)
+                        PosterCard(title: item.name, poster: item.poster, type: item.type, id: item.id)
                     }
                 }
-                .padding(.horizontal, 60).padding(.vertical, 12)
+                .padding(.horizontal, Theme.Space.screenEdge)
+                .padding(.vertical, Theme.Space.md)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-/// Poster artwork (the focusable card content) from an optional URL string.
-struct CorePoster: View {
-    let urlString: String?
-    init(_ urlString: String?) { self.urlString = urlString }
-
+/// Skeleton rail shown while the engine is still loading (signed in). Calmer than a spinner.
+struct LoadingRail: View {
     var body: some View {
-        AsyncImage(url: urlString.flatMap { URL(string: $0) }) { phase in
-            switch phase {
-            case .success(let image): image.resizable().aspectRatio(contentMode: .fill)
-            default: Color.gray.opacity(0.2).overlay(ProgressView())
+        VStack(alignment: .leading, spacing: Theme.Space.md) {
+            RailHeader(title: "Loading your library")
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: Theme.Space.lg) {
+                    ForEach(0..<6, id: \.self) { _ in
+                        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                            .fill(Theme.Palette.surface1)
+                            .frame(width: kPosterWidth, height: kPosterWidth * 1.5)
+                    }
+                }
+                .padding(.horizontal, Theme.Space.screenEdge)
+                .padding(.vertical, Theme.Space.md)
             }
         }
-        .frame(width: 220, height: 330)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-}
-
-/// Just the poster artwork, the focusable element shared by Discover/Search (legacy `MetaPreview`).
-struct PosterImage: View {
-    let item: MetaPreview
-
-    var body: some View {
-        AsyncImage(url: URL(string: item.poster ?? "")) { phase in
-            switch phase {
-            case .success(let img): img.resizable().aspectRatio(contentMode: .fill)
-            default: Color.gray.opacity(0.2).overlay(ProgressView())
-            }
-        }
-        .frame(width: 220, height: 330)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }

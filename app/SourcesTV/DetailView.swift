@@ -12,7 +12,7 @@ struct DetailView: View {
     var body: some View {
         ScrollView {
             if let meta = core.metaDetails?.meta {
-                VStack(alignment: .leading, spacing: 40) {
+                VStack(alignment: .leading, spacing: Theme.Space.xl) {
                     hero(meta)
                     if type == "series", let videos = meta.videos, !videos.isEmpty {
                         CoreSeasonedEpisodes(meta: meta, videos: videos,
@@ -22,57 +22,73 @@ struct DetailView: View {
                                        meta: PlaybackMeta(libraryId: meta.id, videoId: meta.id, type: type,
                                                           name: meta.name, poster: meta.poster,
                                                           season: nil, episode: nil))
-                            .padding(.horizontal, 60)
+                            .padding(.horizontal, Theme.Space.screenEdge)
                     }
                 }
-                .padding(.bottom, 60)
+                .padding(.bottom, Theme.Space.xl)
             } else {
-                ProgressView().padding(120)
+                ProgressView().controlSize(.large).tint(Theme.Palette.accent).padding(120)
             }
         }
-        .background(Color.black.ignoresSafeArea())
+        .background(Theme.Palette.canvas.ignoresSafeArea())
         .ignoresSafeArea(edges: .top)            // let the backdrop bleed to the top edge
         .onAppear { core.loadMeta(type: type, id: id) }
     }
 
-    /// Full-bleed backdrop + gradient with title/metadata/overview overlaid on the lower band.
+    /// Full-bleed backdrop with a canvas-blended gradient and the title / metadata / synopsis on the
+    /// lower band. The serif title is the editorial signature.
     private func hero(_ m: CoreMetaItem) -> some View {
         ZStack(alignment: .bottomLeading) {
             AsyncImage(url: URL(string: m.background ?? m.poster ?? "")) { phase in
                 switch phase {
                 case .success(let img): img.resizable().aspectRatio(contentMode: .fill)
-                default: Color.gray.opacity(0.15)
+                default: Theme.Palette.surface1
                 }
             }
-            .frame(height: 520)
+            .frame(height: 560)
             .frame(maxWidth: .infinity)
             .clipped()
-            .overlay(
-                LinearGradient(colors: [.clear, .black.opacity(0.35), .black.opacity(0.92)],
-                               startPoint: .top, endPoint: .bottom)
-            )
+            .overlay(LinearGradient(colors: [.clear, Theme.Palette.canvas.opacity(0.55), Theme.Palette.canvas],
+                                    startPoint: .top, endPoint: .bottom))
+            .overlay(LinearGradient(colors: [Theme.Palette.canvas.opacity(0.75), .clear],
+                                    startPoint: .leading, endPoint: .center))
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text(m.name).font(.system(size: 56, weight: .heavy)).lineLimit(1)
-                HStack(spacing: 16) {
-                    if let r = m.releaseInfo { Label(r, systemImage: "calendar") }
-                    if let rt = m.runtime { Label(rt, systemImage: "clock") }
-                    if let imdb = m.imdbRating { Label(imdb, systemImage: "star.fill").foregroundStyle(.yellow) }
-                }
-                .font(.title3).foregroundStyle(.white.opacity(0.9))
-                let genres = m.genres
-                if !genres.isEmpty {
-                    Text(genres.prefix(3).joined(separator: " · ")).font(.callout).foregroundStyle(.white.opacity(0.7))
-                }
+            VStack(alignment: .leading, spacing: Theme.Space.sm) {
+                Text(m.name)
+                    .font(Theme.Typography.hero).tracking(-1.5)
+                    .foregroundStyle(Theme.Palette.textPrimary)
+                    .lineLimit(2).minimumScaleFactor(0.6)
+                    .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
+                metaRow(m)
                 if let d = m.description, !d.isEmpty {
-                    Text(d).font(.callout).foregroundStyle(.white.opacity(0.9))
-                        .lineLimit(2).frame(maxWidth: 1300, alignment: .leading)
+                    Text(d)
+                        .font(Theme.Typography.body)
+                        .foregroundStyle(Theme.Palette.textSecondary)
+                        .lineLimit(3).lineSpacing(2)
+                        .frame(maxWidth: 1000, alignment: .leading)
                 }
             }
-            .padding(.horizontal, 60)
-            .padding(.bottom, 32)
+            .padding(.horizontal, Theme.Space.screenEdge)
+            .padding(.bottom, Theme.Space.lg)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func metaRow(_ m: CoreMetaItem) -> some View {
+        HStack(spacing: Theme.Space.md) {
+            if let imdb = m.imdbRating {
+                HStack(spacing: 6) {
+                    Image(systemName: "star.fill").foregroundStyle(Theme.Palette.accent)
+                    Text(imdb)
+                }
+            }
+            if let r = m.releaseInfo { Text(r) }
+            if let rt = m.runtime { Text(rt) }
+            let genres = m.genres
+            if !genres.isEmpty { Text(genres.prefix(3).joined(separator: " · ")).lineLimit(1) }
+        }
+        .font(Theme.Typography.label)
+        .foregroundStyle(Theme.Palette.textSecondary)
     }
 }
 
@@ -92,40 +108,40 @@ struct CoreSeasonedEpisodes: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Text("Episodes").font(.title2.weight(.semibold)).padding(.horizontal, 60)
+        VStack(alignment: .leading, spacing: Theme.Space.md) {
+            RailHeader(eyebrow: "\(episodes.count) episode\(episodes.count == 1 ? "" : "s")", title: "Episodes")
 
             if seasons.count > 1 {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 14) {
+                    HStack(spacing: Theme.Space.sm) {
                         ForEach(seasons, id: \.self) { s in
                             Button { season = s } label: { Text(seasonLabel(s)) }
                                 .buttonStyle(ChipButtonStyle(selected: season == s))
                         }
                     }
-                    .padding(.horizontal, 60).padding(.vertical, 4)
+                    .padding(.horizontal, Theme.Space.screenEdge).padding(.vertical, Theme.Space.xs)
                 }
             }
 
-            // Mark watched/unwatched, selected season + whole series. (Per-episode: long-press a row.)
+            // Mark watched/unwatched: selected season + whole series. (Per-episode: long-press a row.)
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
-                    Button { core.markSeasonWatched(season, true) } label: { Text("Mark \(seasonLabel(season)) watched") }
+                HStack(spacing: Theme.Space.sm) {
+                    Button { core.markSeasonWatched(season, true) } label: { Label("\(seasonLabel(season)) watched", systemImage: "checkmark.circle") }
                         .buttonStyle(ChipButtonStyle())
-                    Button { core.markSeasonWatched(season, false) } label: { Text("Mark \(seasonLabel(season)) unwatched") }
+                    Button { core.markSeasonWatched(season, false) } label: { Label("\(seasonLabel(season)) unwatched", systemImage: "arrow.uturn.backward") }
                         .buttonStyle(ChipButtonStyle())
                     Button { core.markWatched(true) } label: { Text("Whole series watched") }
                         .buttonStyle(ChipButtonStyle())
                     Button { core.markWatched(false) } label: { Text("Whole series unwatched") }
                         .buttonStyle(ChipButtonStyle())
                 }
-                .padding(.horizontal, 60).padding(.vertical, 4)
+                .padding(.horizontal, Theme.Space.screenEdge).padding(.vertical, Theme.Space.xs)
             }
 
-            VStack(spacing: 18) {
+            VStack(spacing: Theme.Space.sm) {
                 ForEach(episodes) { v in episodeRow(v) }
             }
-            .padding(.horizontal, 60)
+            .padding(.horizontal, Theme.Space.screenEdge)
         }
         .onAppear {
             if !seasons.contains(season) { season = seasons.first { $0 > 0 } ?? seasons.first ?? 1 }
@@ -137,51 +153,55 @@ struct CoreSeasonedEpisodes: View {
         return NavigationLink {
             CoreEpisodeStreams(meta: meta, video: v, season: v.season ?? season)
         } label: {
-            HStack(alignment: .top, spacing: 22) {
-                AsyncImage(url: URL(string: v.thumbnail ?? "")) { phase in
-                    switch phase {
-                    case .success(let img): img.resizable().aspectRatio(contentMode: .fill)
-                    default: ZStack { Color.gray.opacity(0.2)
-                        Image(systemName: "play.rectangle.fill").font(.title).foregroundStyle(.secondary) }
-                    }
-                }
-                .frame(width: 300, height: 170)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .overlay(alignment: .topTrailing) {
-                    if isWatched {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.title2).foregroundStyle(.green).padding(8).shadow(radius: 3)
-                    }
-                }
-                .opacity(isWatched ? 0.6 : 1)   // watched episodes are dimmed; unwatched stand out
-
-                VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: Theme.Space.md) {
+                thumbnail(v, isWatched: isWatched)
+                VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         if isWatched {
-                            Image(systemName: "checkmark.circle.fill").font(.callout).foregroundStyle(.green)
+                            Image(systemName: "checkmark.circle.fill").font(.callout).foregroundStyle(Theme.Palette.textSecondary)
                         }
                         Text("\(v.episode ?? 0). \(episodeTitle(v))")
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(isWatched ? Color.secondary : Color.white).lineLimit(2)
+                            .font(Theme.Typography.cardTitle)
+                            .foregroundStyle(isWatched ? Theme.Palette.textTertiary : Theme.Palette.textPrimary)
+                            .lineLimit(2)
                     }
                     if let released = v.released, released.count >= 10 {
-                        Text(String(released.prefix(10))).font(.callout).foregroundStyle(.secondary)
+                        Text(String(released.prefix(10))).font(.system(size: 16)).foregroundStyle(Theme.Palette.textTertiary)
                     }
                     if let overview = v.overview, !overview.isEmpty {
-                        Text(overview).font(.callout).foregroundStyle(.white.opacity(0.7))
+                        Text(overview).font(.system(size: 18)).foregroundStyle(Theme.Palette.textSecondary)
                             .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 Spacer(minLength: 0)
             }
-            .padding(18)
+            .padding(Theme.Space.md)
         }
-        .buttonStyle(.card)
+        .buttonStyle(RowFocusStyle())
         .contextMenu {
             Button(isWatched ? "Mark as Unwatched" : "Mark as Watched") {
                 core.markVideoWatched(v, !isWatched)
             }
         }
+    }
+
+    private func thumbnail(_ v: CoreVideo, isWatched: Bool) -> some View {
+        AsyncImage(url: URL(string: v.thumbnail ?? "")) { phase in
+            switch phase {
+            case .success(let img): img.resizable().aspectRatio(contentMode: .fill)
+            default: Theme.Palette.surface2.overlay(
+                Image(systemName: "play.rectangle.fill").font(.title).foregroundStyle(Theme.Palette.textTertiary))
+            }
+        }
+        .frame(width: 300, height: 170)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
+        .overlay(alignment: .topTrailing) {
+            if isWatched {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title2).foregroundStyle(Theme.Palette.textPrimary).padding(8).shadow(radius: 3)
+            }
+        }
+        .opacity(isWatched ? 0.55 : 1)
     }
 
     private func episodeTitle(_ v: CoreVideo) -> String {
@@ -204,9 +224,9 @@ struct CoreEpisodeStreams: View {
                            meta: PlaybackMeta(libraryId: meta.id, videoId: video.id, type: "series",
                                               name: meta.name, poster: meta.poster,
                                               season: video.season, episode: video.episode))
-                .padding(.horizontal, 60).padding(.vertical, 40)
+                .padding(.horizontal, Theme.Space.screenEdge).padding(.vertical, Theme.Space.xl)
         }
-        .background(Color.black.ignoresSafeArea())
+        .background(Theme.Palette.canvas.ignoresSafeArea())
         .onAppear { core.loadMeta(type: "series", id: meta.id, streamType: "series", streamId: video.id) }
     }
 }
@@ -224,27 +244,29 @@ struct CoreStreamList: View {
         let total = groups.reduce(0) { $0 + $1.streams.count }
         let visible = groups.filter { sourceFilter == nil || $0.addon == sourceFilter }
 
-        return VStack(alignment: .leading, spacing: 16) {
+        return VStack(alignment: .leading, spacing: Theme.Space.md) {
             if total > 0 {
                 Text("\(visible.reduce(0) { $0 + $1.streams.count }) of \(total) source\(total == 1 ? "" : "s")")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .eyebrowStyle()
                 if groups.count > 1 { filterBar(groups, total: total) }
-                ForEach(visible) { group in
-                    ForEach(group.streams) { stream in streamRow(group.addon, stream) }
+                VStack(spacing: Theme.Space.sm) {
+                    ForEach(visible) { group in
+                        ForEach(group.streams) { stream in streamRow(group.addon, stream) }
+                    }
                 }
             } else {
-                HStack(spacing: 12) {
-                    ProgressView()
-                    Text("Finding streams…").foregroundStyle(.secondary)
+                HStack(spacing: Theme.Space.sm) {
+                    ProgressView().tint(Theme.Palette.accent)
+                    Text("Finding streams…").font(Theme.Typography.body).foregroundStyle(Theme.Palette.textSecondary)
                 }
-                .padding(.vertical, 20)
+                .padding(.vertical, Theme.Space.md)
             }
         }
     }
 
     private func filterBar(_ groups: [CoreStreamSourceGroup], total: Int) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 14) {
+            HStack(spacing: Theme.Space.sm) {
                 Button { sourceFilter = nil } label: { Text("All (\(total))") }
                     .buttonStyle(ChipButtonStyle(selected: sourceFilter == nil))
                 ForEach(groups) { group in
@@ -252,7 +274,7 @@ struct CoreStreamList: View {
                         .buttonStyle(ChipButtonStyle(selected: sourceFilter == group.addon))
                 }
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, Theme.Space.xs)
         }
     }
 
@@ -262,39 +284,45 @@ struct CoreStreamList: View {
                 TVPlayerView(url: url, title: title, meta: meta)
                     .task { core.loadEnginePlayer(for: stream); prepareTorrent(stream) }
             } label: { streamLabel(addon, stream, enabled: true) }
-            .buttonStyle(.plain)
+            .buttonStyle(RowFocusStyle())
         } else {
             streamLabel(addon, stream, enabled: false)   // external/youtube, not playable in-app
+                .background(Theme.Palette.surface1.opacity(0.5),
+                            in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         }
     }
 
     private func streamLabel(_ addon: String, _ stream: CoreStream, enabled: Bool) -> some View {
-        let icon = enabled ? (stream.isTorrent ? "arrow.down.circle.fill" : "play.circle.fill") : "lock.circle"
-        return HStack(alignment: .top, spacing: 18) {
-            Image(systemName: icon).font(.title2).foregroundStyle(enabled ? .cyan : .secondary)
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 10) {
-                    Text(addon.uppercased()).font(.caption2.weight(.bold)).tracking(1)
-                        .padding(.horizontal, 10).padding(.vertical, 3)
-                        .background(Color.cyan.opacity(0.18), in: Capsule()).foregroundStyle(.cyan)
-                    if stream.isTorrent {
-                        Text("TORRENT").font(.caption2.weight(.bold)).tracking(1)
-                            .padding(.horizontal, 10).padding(.vertical, 3)
-                            .background(Color.orange.opacity(0.18), in: Capsule()).foregroundStyle(.orange)
-                    }
+        HStack(alignment: .top, spacing: Theme.Space.md) {
+            Image(systemName: enabled ? (stream.isTorrent ? "arrow.down.circle.fill" : "play.circle.fill") : "lock.circle")
+                .font(.system(size: 30))
+                .foregroundStyle(enabled ? Theme.Palette.accent : Theme.Palette.textTertiary)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    badge(addon.uppercased())
+                    if stream.isTorrent { badge("TORRENT") }
                 }
                 if let name = stream.name, !name.isEmpty {
-                    Text(name).font(.headline).foregroundStyle(enabled ? .white : .secondary)
+                    Text(name).font(Theme.Typography.cardTitle)
+                        .foregroundStyle(enabled ? Theme.Palette.textPrimary : Theme.Palette.textTertiary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if let desc = stream.description, !desc.isEmpty {
-                    Text(desc).font(.callout).foregroundStyle(.secondary)
+                    Text(desc).font(.system(size: 18)).foregroundStyle(Theme.Palette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading)
                 }
             }
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 12).opacity(enabled ? 1 : 0.5)
+        .padding(Theme.Space.md)
+        .opacity(enabled ? 1 : 0.55)
+    }
+
+    private func badge(_ text: String) -> some View {
+        Text(text).font(Theme.Typography.eyebrow).tracking(1)
+            .padding(.horizontal, 10).padding(.vertical, 4)
+            .background(Theme.Palette.surface3, in: Capsule())
+            .foregroundStyle(Theme.Palette.textSecondary)
     }
 
     /// Torrents: ask the embedded server to start fetching peers before playback. No-op for url/debrid.

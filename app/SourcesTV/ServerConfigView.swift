@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Configure which Stremio streaming server the app uses, the embedded on-device one, or a
-/// remote/dedicated server (point the Apple TV at a box you run elsewhere). Mirrors the
+/// remote / dedicated server (point the Apple TV at a box you run elsewhere). Mirrors the
 /// "Add server URL" option in the web/desktop apps.
 struct ServerConfigView: View {
     var onChange: () -> Void = {}
@@ -15,36 +15,40 @@ struct ServerConfigView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
-            VStack(alignment: .leading, spacing: 28) {
-                Text("Streaming Server").font(.system(size: 48, weight: .heavy))
-                Text("Use the server embedded on this device, or point StremioX at a remote / dedicated Stremio server (e.g. one you run at home).")
-                    .font(.title3).foregroundStyle(.secondary).frame(maxWidth: 1100, alignment: .leading)
+            Theme.Palette.canvas.ignoresSafeArea()
+            VStack(alignment: .leading, spacing: Theme.Space.lg) {
+                Text("Streaming Server").screenTitleStyle()
+                Text("Use the server embedded on this device, or point StremioX at a remote / dedicated Stremio server (for example one you run at home).")
+                    .font(Theme.Typography.body).foregroundStyle(Theme.Palette.textSecondary)
+                    .frame(maxWidth: 1100, alignment: .leading)
 
                 TextField("http://192.168.1.50:11470", text: $url)
-                    .textContentType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                    .textContentType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    .font(Theme.Typography.body).foregroundStyle(Theme.Palette.textPrimary)
+                    .padding(.horizontal, Theme.Space.md).padding(.vertical, Theme.Space.sm)
+                    .background(Theme.Palette.surface1, in: RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
                     .frame(width: 1000)
 
-                HStack(spacing: 20) {
-                    Button { save() } label: { Text("Save & Use").frame(width: 240) }
-                        .buttonStyle(.borderedProminent).tint(.cyan).disabled(trimmed.isEmpty)
-                    Button { test() } label: { Text(testing ? "Testing…" : "Test").frame(width: 160) }
-                        .disabled(trimmed.isEmpty || testing)
-                    Button(role: .destructive) { useEmbedded() } label: { Text("Use Embedded").frame(width: 260) }
+                HStack(spacing: Theme.Space.md) {
+                    Button { save() } label: { Text("Save & Use") }
+                        .buttonStyle(PrimaryActionStyle()).disabled(trimmed.isEmpty)
+                    Button { test() } label: { Text(testing ? "Testing…" : "Test") }
+                        .buttonStyle(ChipButtonStyle()).disabled(trimmed.isEmpty || testing)
+                    Button { useEmbedded() } label: { Text("Use Embedded") }
+                        .buttonStyle(ChipButtonStyle(selected: true, accent: Theme.Palette.danger, accentText: Theme.Palette.danger))
                 }
 
                 if let testResult {
                     Label(testResult ? "Reachable" : "Couldn't reach that server",
                           systemImage: testResult ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .font(.title3).foregroundStyle(testResult ? .green : .red)
+                        .font(Theme.Typography.body)
+                        .foregroundStyle(testResult ? Color(.sRGB, red: 0.45, green: 0.72, blue: 0.42) : Theme.Palette.danger)
                 }
 
                 Text("Currently using: \(StremioServer.base)\(StremioServer.isCustom ? "" : "  (embedded)")")
-                    .font(.callout.monospaced()).foregroundStyle(.secondary)
+                    .font(.system(size: 18, design: .monospaced)).foregroundStyle(Theme.Palette.textTertiary)
             }
-            .padding(60)
+            .padding(Theme.Space.screenEdge)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
     }

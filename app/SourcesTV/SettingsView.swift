@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Settings: who you're signed in as, the embedded streaming-server status, and app info.
-/// Mirrors the official tvOS app's Settings → Account / Streaming sections.
+/// Settings: who you're signed in as, the embedded streaming-server status, subtitles, and app info.
+/// Mirrors the official tvOS app's Settings sections, on the StremioX design system.
 struct SettingsView: View {
     @EnvironmentObject private var account: StremioAccount
     @EnvironmentObject private var core: CoreBridge
@@ -13,17 +13,18 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 44) {
-                    Text("Settings").font(.system(size: 56, weight: .heavy))
+                VStack(alignment: .leading, spacing: Theme.Space.lg) {
+                    Text("Settings").screenTitleStyle()
                     accountSection
                     serverSection
                     subtitleSection
                     aboutSection
                 }
-                .padding(60)
+                .padding(.horizontal, Theme.Space.screenEdge)
+                .padding(.vertical, Theme.Space.xl)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .background(Color.black.ignoresSafeArea())
+            .background(Theme.Palette.canvas.ignoresSafeArea())
         }
         .task { serverOnline = await StremioServer.isOnline() }
     }
@@ -33,25 +34,25 @@ struct SettingsView: View {
     @ViewBuilder private var accountSection: some View {
         section("Account") {
             if account.isSignedIn {
-                HStack(spacing: 22) {
+                HStack(spacing: Theme.Space.md) {
                     Image(systemName: "person.crop.circle.fill")
-                        .font(.system(size: 56)).foregroundStyle(.cyan)
+                        .font(.system(size: 52)).foregroundStyle(Theme.Palette.accent)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(account.email ?? "Signed in").font(.title3.weight(.semibold))
+                        Text(account.email ?? "Signed in").font(Theme.Typography.cardTitle).foregroundStyle(Theme.Palette.textPrimary)
                         Text("\(account.addons.count) add-ons · \(account.streamAddonBases.count) stream sources")
-                            .font(.callout).foregroundStyle(.secondary)
+                            .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
                     }
                     Spacer()
                     Button { account.signOut(); core.logOut() } label: {
                         Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
                     }
-                    .buttonStyle(ChipButtonStyle(selected: true, accent: .red, accentText: .white))
+                    .buttonStyle(ChipButtonStyle(selected: true, accent: Theme.Palette.danger, accentText: Theme.Palette.danger))
                 }
             } else {
                 NavigationLink { LoginView(account: account) } label: {
                     Label("Sign in to your Stremio account", systemImage: "person.crop.circle")
                 }
-                .buttonStyle(.card)
+                .buttonStyle(PrimaryActionStyle())
             }
         }
     }
@@ -60,30 +61,35 @@ struct SettingsView: View {
 
     private var serverSection: some View {
         section("Streaming Server") {
-            HStack(spacing: 16) {
-                Circle().fill(serverColor).frame(width: 18, height: 18)
-                Text(serverText).font(.title3)
+            HStack(spacing: Theme.Space.sm) {
+                Circle().fill(serverColor).frame(width: 16, height: 16)
+                Text(serverText).font(Theme.Typography.body).foregroundStyle(Theme.Palette.textPrimary)
                 Spacer()
                 Text(StremioServer.isCustom ? "CUSTOM" : "EMBEDDED")
-                    .font(.caption.weight(.bold)).tracking(1)
-                    .padding(.horizontal, 14).padding(.vertical, 5)
-                    .background(Color.white.opacity(0.1), in: Capsule())
+                    .font(Theme.Typography.eyebrow).tracking(1)
+                    .padding(.horizontal, 12).padding(.vertical, 5)
+                    .background(Theme.Palette.surface3, in: Capsule())
+                    .foregroundStyle(Theme.Palette.textSecondary)
             }
-            Text(StremioServer.base).font(.callout.monospaced()).foregroundStyle(.secondary)
+            Text(StremioServer.base).font(.system(size: 18, design: .monospaced)).foregroundStyle(Theme.Palette.textTertiary)
             NavigationLink {
                 ServerConfigView { Task { serverOnline = await StremioServer.isOnline() } }
             } label: {
                 Label("Configure server", systemImage: "server.rack")
             }
-            .buttonStyle(.card)
+            .buttonStyle(PrimaryActionStyle())
         }
     }
 
     private var serverColor: Color {
-        switch serverOnline { case .some(true): .green; case .some(false): .red; default: .yellow }
+        switch serverOnline {
+        case .some(true): return Color(.sRGB, red: 0.45, green: 0.72, blue: 0.42)
+        case .some(false): return Theme.Palette.danger
+        default: return Theme.Palette.accent
+        }
     }
     private var serverText: String {
-        switch serverOnline { case .some(true): "Online"; case .some(false): "Offline"; default: "Checking…" }
+        switch serverOnline { case .some(true): return "Online"; case .some(false): return "Offline"; default: return "Checking…" }
     }
 
     // MARK: Subtitles
@@ -93,23 +99,20 @@ struct SettingsView: View {
             choiceRow("Size", SubtitleStyle.sizes.map { ($0.id, $0.label) }, selection: $subSize)
             choiceRow("Color", SubtitleStyle.colors.map { ($0.id, $0.label) }, selection: $subColor)
             choiceRow("Background", SubtitleStyle.backgrounds.map { ($0.id, $0.label) }, selection: $subBackground)
-            Text("Styles the built-in player's subtitles. Choose which subtitle track to show from the player while watching.")
-                .font(.callout).foregroundStyle(.secondary)
+            Text("Styles the built-in player's subtitles. Pick which subtitle track to show from the player while watching.")
+                .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
         }
     }
 
-    /// A labeled row of selectable chips bound to a stored choice (matches the Discover chip style).
     private func choiceRow(_ label: String, _ options: [(id: String, label: String)],
                            selection: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(label).font(.title3.weight(.semibold))
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
+            Text(label).font(Theme.Typography.cardTitle).foregroundStyle(Theme.Palette.textPrimary)
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 14) {
+                HStack(spacing: Theme.Space.sm) {
                     ForEach(options, id: \.id) { opt in
-                        Button { selection.wrappedValue = opt.id } label: {
-                            Text(opt.label)
-                        }
-                        .buttonStyle(ChipButtonStyle(selected: selection.wrappedValue == opt.id))
+                        Button { selection.wrappedValue = opt.id } label: { Text(opt.label) }
+                            .buttonStyle(ChipButtonStyle(selected: selection.wrappedValue == opt.id))
                     }
                 }
             }
@@ -127,7 +130,7 @@ struct SettingsView: View {
     }
 
     private var appVersion: String {
-        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ", "
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
         let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
         return b.isEmpty ? v : "\(v) (\(b))"
     }
@@ -135,21 +138,25 @@ struct SettingsView: View {
     // MARK: Section chrome
 
     @ViewBuilder private func section<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text(title.uppercased()).font(.caption.weight(.bold)).foregroundStyle(.secondary).tracking(2)
+        VStack(alignment: .leading, spacing: Theme.Space.md) {
+            Text(title).eyebrowStyle()
             content()
         }
-        .padding(28)
+        .padding(Theme.Space.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
-        // tvOS focus is spatial: "Log Out" sits far right (after a Spacer) while the next
-        // focusable views (Configure server, subtitle chips) are left-aligned, outside the
-        // downward beam, so Down would otherwise stick on Log Out. Making each section a focus
-        // section lets the engine redirect focus into it even when it's off the movement axis.
+        .background(Theme.Palette.surface1, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        // tvOS focus is spatial: "Log Out" sits far right (after a Spacer) while the next focusable
+        // views are left-aligned, outside the downward beam. Making each section a focus section lets
+        // the engine redirect focus into it even when it's off the movement axis.
         .focusSection()
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {
-        HStack { Text(label); Spacer(); Text(value).foregroundStyle(.secondary) }.font(.title3)
+        HStack {
+            Text(label).foregroundStyle(Theme.Palette.textPrimary)
+            Spacer()
+            Text(value).foregroundStyle(Theme.Palette.textSecondary)
+        }
+        .font(Theme.Typography.body)
     }
 }

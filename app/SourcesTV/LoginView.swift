@@ -2,7 +2,7 @@ import SwiftUI
 import Combine
 
 /// tvOS sign-in for a Stremio account. Pulls the user's addons (AIOStreams etc.) so their
-/// real debrid streams play. The token/addon URLs stay on-device.
+/// real streams play. The token and addon URLs stay on-device.
 struct LoginView: View {
     @ObservedObject var account: StremioAccount
     @EnvironmentObject private var core: CoreBridge
@@ -13,46 +13,56 @@ struct LoginView: View {
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
-            VStack(spacing: 28) {
-                HStack(spacing: 16) {
-                    Image(systemName: "play.tv.fill").font(.system(size: 44)).foregroundStyle(.cyan)
-                    Text("StremioX").font(.system(size: 56, weight: .heavy))
+            Theme.Palette.canvas.ignoresSafeArea()
+            VStack(spacing: Theme.Space.lg) {
+                HStack(spacing: 0) {
+                    Text("Stremio").foregroundStyle(Theme.Palette.textPrimary)
+                    Text("X").foregroundStyle(Theme.Palette.accent)
                 }
-                Text("Sign in to your Stremio account to load your addons and streams.")
-                    .foregroundStyle(.secondary)
+                .font(Theme.Typography.hero)
 
-                VStack(spacing: 18) {
-                    TextField("Email", text: $email)
-                        .textContentType(.emailAddress)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                    SecureField("Password", text: $password)
-                        .textContentType(.password)
+                Text("Sign in to your Stremio account to load your addons and streams.")
+                    .font(Theme.Typography.body)
+                    .foregroundStyle(Theme.Palette.textSecondary)
+
+                VStack(spacing: Theme.Space.md) {
+                    field { TextField("Email", text: $email)
+                        .textContentType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled() }
+                    field { SecureField("Password", text: $password).textContentType(.password) }
                 }
                 .frame(width: 700)
 
                 if let err = account.signInError {
-                    Text(err).foregroundStyle(.red)
+                    Text(err).font(Theme.Typography.label).foregroundStyle(Theme.Palette.danger)
                 }
 
                 Button {
                     busy = true
                     Task { await account.signIn(email: email, password: password); busy = false }
                 } label: {
-                    Text(busy ? "Signing in…" : "Sign In").frame(width: 300)
+                    Text(busy ? "Signing in…" : "Sign In").frame(width: 280)
                 }
+                .buttonStyle(PrimaryActionStyle())
                 .disabled(busy || email.isEmpty || password.isEmpty)
             }
-            .padding(60)
+            .padding(Theme.Space.screenEdge)
         }
-        // Login is pushed via NavigationLink; pop back to Home the moment the token is saved,
-        // otherwise a successful sign-in leaves the user staring at this same screen.
+        // Login is pushed via NavigationLink; pop back the moment the token is saved, otherwise a
+        // successful sign-in leaves the user staring at this same screen.
         .onReceive(account.$isSignedIn) { signedIn in
             if signedIn {
                 core.signedInWithLegacyAuthKey()   // seed the engine now, not on next launch
                 dismiss()
             }
         }
+    }
+
+    private func field<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .font(Theme.Typography.body)
+            .foregroundStyle(Theme.Palette.textPrimary)
+            .padding(.horizontal, Theme.Space.md)
+            .padding(.vertical, Theme.Space.sm)
+            .background(Theme.Palette.surface1, in: RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
     }
 }

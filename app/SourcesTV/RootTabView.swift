@@ -20,5 +20,6 @@ struct RootTabView: View {
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
+        .tint(Theme.Palette.accent)
     }
 }

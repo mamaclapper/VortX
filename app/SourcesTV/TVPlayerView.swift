@@ -92,7 +92,7 @@ struct TVPlayerView: View {
                 .ignoresSafeArea()
 
             if buffering && !loadFailed {
-                ProgressView().controlSize(.large).tint(.white)
+                ProgressView().controlSize(.large).tint(Theme.Palette.accent)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             if showInfo && !showOptions && !loadFailed { controlBar }
@@ -131,12 +131,14 @@ struct TVPlayerView: View {
     // MARK: - Control bar
 
     private var controlBar: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            if !curTitle.isEmpty { Text(curTitle).font(.title3.weight(.semibold)).lineLimit(1) }
-            HStack(spacing: 14) {
-                Text(timeString(currentTime)).font(.callout.monospacedDigit())
-                ProgressView(value: duration > 0 ? min(1, currentTime / duration) : 0).tint(.cyan)
-                Text(timeString(duration)).font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: Theme.Space.md) {
+            if !curTitle.isEmpty {
+                Text(curTitle).font(Theme.Typography.cardTitle).foregroundStyle(Theme.Palette.textPrimary).lineLimit(1)
+            }
+            HStack(spacing: Theme.Space.sm) {
+                Text(timeString(currentTime)).font(.callout.monospacedDigit()).foregroundStyle(Theme.Palette.textPrimary)
+                ProgressView(value: duration > 0 ? min(1, currentTime / duration) : 0).tint(Theme.Palette.accent)
+                Text(timeString(duration)).font(.callout.monospacedDigit()).foregroundStyle(Theme.Palette.textSecondary)
             }
             HStack(spacing: 16) {
                 barButton(.back, "gobackward.10", "−10s") { seek(-10) }
@@ -195,7 +197,7 @@ struct TVPlayerView: View {
                         }
                     }
                     if subtitleTracks.isEmpty {
-                        Text("No subtitle tracks in this stream").foregroundStyle(.secondary)
+                        Text("No subtitle tracks in this stream").foregroundStyle(Theme.Palette.textSecondary)
                     }
                 }
                 if episodes.count > 1 {
@@ -209,7 +211,7 @@ struct TVPlayerView: View {
             }
             .frame(width: 720)
             .frame(maxHeight: .infinity)
-            .background(.ultraThinMaterial)
+            .background(Theme.Palette.surface1.opacity(0.98))
         }
         .ignoresSafeArea()
         .transition(.move(edge: .trailing))
@@ -220,7 +222,7 @@ struct TVPlayerView: View {
             HStack {
                 Text(label).lineLimit(1)
                 Spacer()
-                if selected { Image(systemName: "checkmark").foregroundStyle(.cyan) }
+                if selected { Image(systemName: "checkmark").foregroundStyle(Theme.Palette.accent) }
             }
         }
     }
@@ -247,19 +249,20 @@ struct TVPlayerView: View {
 
     private var loadErrorOverlay: some View {
         ZStack {
-            Color.black.opacity(0.92).ignoresSafeArea()
-            VStack(spacing: 18) {
-                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 60)).foregroundStyle(.yellow)
-                Text("This source didn't load").font(.title2.weight(.semibold))
+            Theme.Palette.canvas.opacity(0.94).ignoresSafeArea()
+            VStack(spacing: Theme.Space.md) {
+                Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 60)).foregroundStyle(Theme.Palette.danger)
+                Text("This source didn't load")
+                    .font(Theme.Typography.sectionTitle).foregroundStyle(Theme.Palette.textPrimary)
                 Text(loadErrorMsg.isEmpty
-                     ? "It may be uncached on your debrid (still downloading), offline, or an unsupported link."
-                     : "It may be uncached/offline/unsupported.  (\(loadErrorMsg))")
-                    .font(.title3).foregroundStyle(.secondary)
+                     ? "It may still be downloading on your source, offline, or an unsupported link."
+                     : "It may be unavailable, offline, or unsupported.  (\(loadErrorMsg))")
+                    .font(Theme.Typography.body).foregroundStyle(Theme.Palette.textSecondary)
                     .multilineTextAlignment(.center).frame(maxWidth: 900)
                 Text("Menu = back to sources    ·    Play/Pause = retry")
-                    .font(.callout).foregroundStyle(.secondary).padding(.top, 8)
+                    .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textTertiary).padding(.top, Theme.Space.xs)
             }
-            .padding(60)
+            .padding(Theme.Space.screenEdge)
         }
         .transition(.opacity)
     }

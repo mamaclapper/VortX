@@ -1,20 +1,15 @@
 import SwiftUI
 
-/// A pill/chip button with explicit, high-contrast colours for tvOS.
+/// Filter / segment chip for tvOS, on the StremioX design system (see Theme.swift).
 ///
-/// Fixes the low-contrast "selected" state of `.bordered` + `.tint`, where the label is drawn in
-/// the same hue as the fill (cyan text on a cyan fill, red text on a red fill). Here the fill and
-/// text are chosen independently, and focus is shown with a bright white pill + a lift so the
-/// focused chip is unmistakable.
-///
-/// Three states:
-/// - **focused**  → white pill, black text (the system focus highlight)
-/// - **selected** → accent pill, `accentText` text (cyan is light, so black reads best on it)
-/// - **idle**     → subtle dark pill, white text
+/// Three states, all warm-neutral with the ember accent reserved for meaning:
+/// - **idle**     → `surface2` pill, secondary text
+/// - **selected** → soft-ember pill, ember text (pass `accent`/`accentText` to override, e.g. destructive)
+/// - **focused**  → ember ring + lift + brightened text, so the focused chip is unmistakable at ten feet
 struct ChipButtonStyle: ButtonStyle {
     var selected: Bool = false
-    var accent: Color = .cyan
-    var accentText: Color = .black     // text colour to use on the accent fill
+    var accent: Color = Theme.Palette.accent
+    var accentText: Color = Theme.Palette.accent
 
     func makeBody(configuration: Configuration) -> some View {
         Chip(selected: selected, accent: accent, accentText: accentText, configuration: configuration)
@@ -24,29 +19,30 @@ struct ChipButtonStyle: ButtonStyle {
         let selected: Bool
         let accent: Color
         let accentText: Color
-        let configuration: Configuration
+        let configuration: ButtonStyleConfiguration
         @Environment(\.isFocused) private var focused: Bool
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
         var body: some View {
             configuration.label
-                .font(.callout.weight(.semibold))
-                .padding(.horizontal, 24)
-                .padding(.vertical, 10)
+                .font(Theme.Typography.label)
+                .padding(.horizontal, Theme.Space.md)
+                .padding(.vertical, Theme.Space.xs + 2)
                 .foregroundStyle(textColor)
-                .background(fill, in: Capsule())
-                .scaleEffect(configuration.isPressed ? 0.96 : (focused ? 1.08 : 1.0))
-                .animation(.easeOut(duration: 0.15), value: focused)
+                .background(fill, in: Capsule(style: .continuous))
+                .overlay(Capsule(style: .continuous).strokeBorder(accent, lineWidth: focused ? 3 : 0))
+                .scaleEffect(configuration.isPressed ? 0.97 : (focused && !reduceMotion ? 1.06 : 1))
+                .shadow(color: accent.opacity(focused ? 0.4 : 0), radius: 18, y: 8)
+                .animation(reduceMotion ? nil : Theme.Motion.focus, value: focused)
         }
 
         private var fill: Color {
-            if focused { return .white }
-            if selected { return accent }
-            return Color.white.opacity(0.14)
+            if selected { return accent.opacity(0.18) }
+            return Theme.Palette.surface2
         }
         private var textColor: Color {
-            if focused { return .black }
             if selected { return accentText }
-            return .white
+            return focused ? Theme.Palette.textPrimary : Theme.Palette.textSecondary
         }
     }
 }
