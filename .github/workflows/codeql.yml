@@ -26,12 +26,7 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: rust
-
-      - name: Install Rust nightly
-        run: rustup toolchain install nightly --profile minimal
-
-      - name: Build the engine crate
-        run: cargo +nightly build --manifest-path core/Cargo.toml --locked
+          build-mode: none   # analyze source + Cargo metadata, no cross-target build needed
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v3
