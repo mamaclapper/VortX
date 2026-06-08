@@ -111,7 +111,12 @@ final class MPVMetalViewController: UIViewController {
             print("failed creating context\n")
             exit(1)
         }
-        
+
+        // Apply the "fast" profile first so it sets the baseline (cheaper scaling, no debanding/dither,
+        // static HDR peak); the explicit options below override anything we care about. This is the
+        // documented remedy for 4K frame drops on constrained GPUs, which is what stutters on device.
+        checkError(mpv_set_option_string(mpv, "profile", "fast"))
+
         // https://mpv.io/manual/stable/#options
 #if DEBUG
         checkError(mpv_request_log_messages(mpv, "v"))
@@ -124,6 +129,11 @@ final class MPVMetalViewController: UIViewController {
         checkError(mpv_set_option(mpv, "wid", MPV_FORMAT_INT64, &metalLayer))
         checkError(mpv_set_option_string(mpv, "subs-match-os-language", "yes"))
         checkError(mpv_set_option_string(mpv, "subs-fallback", "yes"))
+        // Use CoreText for font lookup so libass falls back to the system CJK fonts (Apple SD Gothic Neo
+        // for Korean, PingFang, Hiragino) for non-Latin subtitles instead of rendering them as empty
+        // boxes. Keep embedded fonts (ASS/SSA) enabled too.
+        checkError(mpv_set_option_string(mpv, "sub-font-provider", "coretext"))
+        checkError(mpv_set_option_string(mpv, "embeddedfonts", "yes"))
         // User-configured subtitle appearance (size / colour / background), see SubtitleStyle.
         for (name, value) in SubtitleStyle.mpvOptions {
             checkError(mpv_set_option_string(mpv, name, value))
@@ -159,6 +169,19 @@ final class MPVMetalViewController: UIViewController {
         // a hiccup looks like an infinite buffer. Followed by hard failure → MPV_EVENT_END_FILE.
         checkError(mpv_set_option_string(mpv, "stream-lavf-o",
             "reconnect=1,reconnect_streamed=1,reconnect_delay_max=7"))
+
+        // Aggressive read-ahead cache: buffer far past the play head so transient network dips on big
+        // 4K streams don't stall playback (the main cause of on-device stutter). The forward cache is
+        // capped by RAM, so it's larger on the Apple TV (4GB) than on iPhone. Some back-buffer keeps
+        // short rewinds instant.
+        checkError(mpv_set_option_string(mpv, "cache", "yes"))
+        checkError(mpv_set_option_string(mpv, "demuxer-readahead-secs", "300"))
+        checkError(mpv_set_option_string(mpv, "demuxer-max-back-bytes", "64MiB"))
+#if os(tvOS)
+        checkError(mpv_set_option_string(mpv, "demuxer-max-bytes", "512MiB"))
+#else
+        checkError(mpv_set_option_string(mpv, "demuxer-max-bytes", "256MiB"))
+#endif
 
 //        checkError(mpv_set_option_string(mpv, "target-colorspace-hint", "yes")) // HDR passthrough
 //        checkError(mpv_set_option_string(mpv, "tone-mapping-visualize", "yes"))  // only for debugging purposes

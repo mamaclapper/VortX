@@ -43,6 +43,9 @@ struct TVPlayerView: View {
     @FocusState private var focus: Focus?
     private let plog = Logger(subsystem: "com.stremiox.app", category: "tvplayer")
 
+    /// True when no control bar / panel / error is up, so the full-screen catch button owns the remote.
+    private var controlsHidden: Bool { !showInfo && !showOptions && !loadFailed }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             Color.black.ignoresSafeArea()
@@ -91,19 +94,27 @@ struct TVPlayerView: View {
                 ProgressView().controlSize(.large).tint(Theme.Palette.accent)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            // When the bar is hidden, a full-screen focusable button owns the remote: Select or any
+            // swipe reveals the controls. A concrete Button focuses far more reliably than a bare
+            // .focusable() surface inside the full-screen cover, which dropped remote input on device.
+            if controlsHidden {
+                Button { showControls() } label: { Color.clear.contentShape(Rectangle()) }
+                    .buttonStyle(.plain)
+                    .focused($focus, equals: .player)
+                    .onMoveCommand { _ in showControls() }
+            }
             if showInfo && !showOptions && !loadFailed { controlBar }
             if showOptions { optionsPanel }
             if loadFailed { loadErrorOverlay }
         }
-        .focusable()                                      // always a valid focus target, so focus is never dropped
-        .focused($focus, equals: .player)
-        .defaultFocus($focus, .play)                      // reliably seed focus into the cover (device-safe)
-        .onMoveCommand { _ in showControls() }            // any direction (bar hidden) reveals the bar
-        .onTapGesture { showControls() }                  // Select (bar hidden) reveals the bar
+        .defaultFocus($focus, .play)                      // seed focus into the cover (device-safe)
         .onPlayPauseCommand { toggle() }
         .onExitCommand {
             if showOptions { closePanel() }
             else { saveProgress(at: currentTime); dismiss() }
+        }
+        .onChange(of: focus) { _ in
+            if showInfo { scheduleHide() }                // moving across the bar keeps it visible
         }
         .onAppear {
             if curURL == nil { curURL = url; curTitle = title; curMeta = meta }   // seed from initial
@@ -370,10 +381,10 @@ struct TVPlayerView: View {
     private func scheduleHide() {
         hideTask?.cancel()
         hideTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(6))
+            try? await Task.sleep(for: .seconds(8))
             guard !showOptions else { return }
             withAnimation { showInfo = false }
-            focus = .player                          // hand focus back to the (now focusable) surface
+            focus = .player                          // hand focus to the full-screen catch button
         }
     }
 
