@@ -11,11 +11,11 @@ struct TVPlayerView: View {
     let title: String
     var meta: PlaybackMeta? = nil          // when set, resume + record watch progress to the library
     var episodes: [Video] = []             // series' ordered episodes (empty for movies) → Next/Prev/list
+    var onClose: () -> Void = {}           // dismiss the dedicated player window
 
     @EnvironmentObject private var account: StremioAccount
     @EnvironmentObject private var core: CoreBridge
     @State private var markedWatched = false   // mark the engine watched once, near end of playback
-    @EnvironmentObject private var presenter: PlayerPresenter   // root overlay: clear request to dismiss
     @StateObject private var coordinator = MPVMetalPlayerView.Coordinator()
     @State private var buffering = true
     @State private var isPaused = false
@@ -99,8 +99,9 @@ struct TVPlayerView: View {
                 }
                 .ignoresSafeArea()
 
-            // UIKit owns ALL remote input (reliable inside the full-screen cover, unlike SwiftUI focus).
-            RemoteCatcher { handlePress($0) }
+            // UIKit owns ALL remote input. Presented in a dedicated key window so the focus engine has no
+            // competitor and every press falls through to here. Swipes come via the pan recognizer.
+            RemoteCatcher(onPress: { handlePress($0) }, onSwipe: { showControls() })
 
             if buffering && !loadFailed {
                 ProgressView().controlSize(.large).tint(Theme.Palette.accent)
@@ -135,7 +136,7 @@ struct TVPlayerView: View {
     private func handlePress(_ type: UIPress.PressType) {
         if loadFailed {
             switch type {
-            case .menu: saveProgress(at: currentTime); presenter.request = nil
+            case .menu: saveProgress(at: currentTime); onClose()
             case .select, .playPause: retryLoad()
             default: break
             }
@@ -153,7 +154,7 @@ struct TVPlayerView: View {
         }
         if controlsHidden {
             switch type {
-            case .menu: saveProgress(at: currentTime); presenter.request = nil
+            case .menu: saveProgress(at: currentTime); onClose()
             case .playPause: toggle()
             default: showControls()                       // any swipe / select reveals the bar
             }
@@ -161,7 +162,7 @@ struct TVPlayerView: View {
         }
         // Control bar is shown: navigate it.
         switch type {
-        case .menu: saveProgress(at: currentTime); presenter.request = nil
+        case .menu: saveProgress(at: currentTime); onClose()
         case .playPause: toggle()
         case .select: activate(selected)
         case .leftArrow: moveSelected(-1)
@@ -193,7 +194,7 @@ struct TVPlayerView: View {
 
     private func activate(_ c: Control) {
         switch c {
-        case .close: saveProgress(at: currentTime); presenter.request = nil
+        case .close: saveProgress(at: currentTime); onClose()
         case .back:  seek(-10)
         case .fwd:   seek(10)
         case .play:  toggle()
@@ -461,7 +462,7 @@ struct TVPlayerView: View {
 
     /// Auto-advance when an episode ends: next episode if there is one, otherwise leave the player.
     private func autoAdvance() {
-        if hasNextEpisode { playNext() } else { saveProgress(at: currentTime); presenter.request = nil }
+        if hasNextEpisode { playNext() } else { saveProgress(at: currentTime); onClose() }
     }
 
     /// Switch to another episode in place: flush progress, resolve a stream, then reload mpv.
@@ -556,19 +557,33 @@ struct TVPlayerView: View {
 /// reliable than SwiftUI `@FocusState` + `onMoveCommand` inside a full-screen cover on tvOS.
 private struct RemoteCatcher: UIViewRepresentable {
     var onPress: (UIPress.PressType) -> Void
+    var onSwipe: () -> Void
 
     func makeUIView(context: Context) -> CatchView {
-        let v = CatchView(); v.onPress = onPress; return v
+        let v = CatchView(); v.onPress = onPress; v.onSwipe = onSwipe; return v
     }
-    func updateUIView(_ uiView: CatchView, context: Context) { uiView.onPress = onPress }
+    func updateUIView(_ uiView: CatchView, context: Context) { uiView.onPress = onPress; uiView.onSwipe = onSwipe }
 
     final class CatchView: UIView {
         var onPress: ((UIPress.PressType) -> Void)?
+        var onSwipe: (() -> Void)?
         override var canBecomeFocused: Bool { true }
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            if window != nil { setNeedsFocusUpdate(); updateFocusIfNeeded() }
+            guard window != nil else { return }
+            setNeedsFocusUpdate(); updateFocusIfNeeded()
+            if gestureRecognizers?.isEmpty ?? true {
+                // Swipes on the Siri-remote touch surface are NOT UIPress events, so pressesBegan never
+                // sees them. A pan recognizer for indirect (remote) touches wakes the controls on a swipe.
+                let pan = UIPanGestureRecognizer(target: self, action: #selector(handleSurfaceTouch))
+                pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.indirect.rawValue)]
+                addGestureRecognizer(pan)
+            }
+        }
+
+        @objc private func handleSurfaceTouch(_ g: UIPanGestureRecognizer) {
+            if g.state == .began { onSwipe?() }
         }
 
         /// Trap focus: refuse to let the focus engine move focus AWAY from this view, so a directional
