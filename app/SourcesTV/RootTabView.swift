@@ -44,6 +44,7 @@ struct RootView: View {
 struct RootTabView: View {
     @EnvironmentObject private var account: StremioAccount
     @State private var tab = 0
+    @FocusState private var focusedTab: Int?
 
     private static let tabs: [(title: String, icon: String)] = [
         ("Home", "house.fill"),
@@ -64,6 +65,7 @@ struct RootTabView: View {
                             .font(Theme.Typography.label)
                     }
                     .buttonStyle(TabBarButtonStyle(selected: tab == index))
+                    .focused($focusedTab, equals: index)
                 }
             }
             .focusSection()
@@ -72,8 +74,14 @@ struct RootTabView: View {
 
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .focusSection()   // its own section so the content can release focus UP to the tab bar
         }
         .background(Theme.Palette.canvas.ignoresSafeArea())
+        // Native tvOS tab bars switch the tab as focus crosses them — replicate that so you don't have to
+        // click each tab. Only react when a tab is actually focused (nil = focus moved into the content).
+        .onChange(of: focusedTab) { newValue in
+            if let newValue { tab = newValue }
+        }
     }
 
     @ViewBuilder private var content: some View {
