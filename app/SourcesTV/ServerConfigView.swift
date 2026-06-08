@@ -29,11 +29,14 @@ struct ServerConfigView: View {
                     .background(Theme.Palette.surface1, in: RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
                     .frame(width: 1000)
 
+                // NOTE: never use `.disabled` on tvOS buttons — a disabled button is not focusable, so
+                // the remote can't move onto it and focus gets stuck on the only enabled control. Keep all
+                // three reachable and validate inside the actions instead.
                 HStack(spacing: Theme.Space.md) {
                     Button { save() } label: { Text("Save & Use") }
-                        .buttonStyle(PrimaryActionStyle()).disabled(trimmed.isEmpty)
+                        .buttonStyle(PrimaryActionStyle())
                     Button { test() } label: { Text(testing ? "Testing…" : "Test") }
-                        .buttonStyle(ChipButtonStyle()).disabled(trimmed.isEmpty || testing)
+                        .buttonStyle(ChipButtonStyle())
                     Button { useEmbedded() } label: { Text("Use Embedded") }
                         .buttonStyle(ChipButtonStyle(selected: true, accent: Theme.Palette.danger, accentText: Theme.Palette.danger))
                 }
@@ -54,6 +57,7 @@ struct ServerConfigView: View {
     }
 
     private func save() {
+        guard !trimmed.isEmpty else { testResult = false; return }   // need a URL to save
         StremioServer.setBase(trimmed)
         onChange()
         dismiss()
@@ -66,6 +70,7 @@ struct ServerConfigView: View {
     }
 
     private func test() {
+        guard !trimmed.isEmpty, !testing else { return }
         testing = true; testResult = nil
         Task {
             let ok = await StremioServer.reachable(trimmed)

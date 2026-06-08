@@ -26,7 +26,15 @@ struct SettingsView: View {
             }
             .background(Theme.Palette.canvas.ignoresSafeArea())
         }
-        .task { serverOnline = await StremioServer.isOnline() }
+        .task {
+            // The embedded server cold-starts a few seconds after launch, so poll instead of checking
+            // once — otherwise an early miss shows "offline" forever even after the server comes up.
+            for _ in 0..<12 {
+                if await StremioServer.isOnline() { serverOnline = true; return }
+                serverOnline = false
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
     }
 
     // MARK: Account
