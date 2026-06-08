@@ -25,7 +25,7 @@ struct StremioTVApp: App {
                 if ProcessInfo.processInfo.arguments.contains("-tv-selftest") {
                     TVPlayerView(url: URL(string: "https://download.blender.org/peach/bigbuckbunny_movies/BigBuckBunny_320x180.mp4")!, title: "Player Test, Oceans")
                 } else {
-                    RootView()   // player OR shell, never both — the only reliable tvOS focus isolation
+                    RootView()   // player OR shell, never both, the only reliable tvOS focus isolation
                 }
             }
             .environmentObject(account)

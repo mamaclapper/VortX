@@ -29,7 +29,7 @@ struct ServerConfigView: View {
                     .background(Theme.Palette.surface1, in: RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
                     .frame(width: 1000)
 
-                // NOTE: never use `.disabled` on tvOS buttons — a disabled button is not focusable, so
+                // NOTE: never use `.disabled` on tvOS buttons, a disabled button is not focusable, so
                 // the remote can't move onto it and focus gets stuck on the only enabled control. Keep all
                 // three reachable and validate inside the actions instead.
                 HStack(spacing: Theme.Space.md) {
@@ -70,10 +70,13 @@ struct ServerConfigView: View {
     }
 
     private func test() {
-        guard !trimmed.isEmpty, !testing else { return }
+        guard !testing else { return }
+        // Test the entered URL; if the field is empty, test the currently-active server so the button
+        // always gives feedback (it silently did nothing before when the field was empty).
+        let target = trimmed.isEmpty ? StremioServer.base : trimmed
         testing = true; testResult = nil
         Task {
-            let ok = await StremioServer.reachable(trimmed)
+            let ok = await StremioServer.reachable(target)
             testing = false; testResult = ok
         }
     }

@@ -31,7 +31,13 @@ struct TVPlayerView: View {
     @State private var hideTask: Task<Void, Never>?
     @State private var audioTracks: [MPVTrack] = []
     @State private var subtitleTracks: [MPVTrack] = []
-    @State private var showOptions = false             // audio/subtitle/episode list panel
+    @State private var showOptions = false             // options panel (audio / subtitles / aspect / episodes)
+    @State private var panelKind: PanelKind = .audio   // which list the options panel shows
+    @State private var subDelay: Double = 0            // manual subtitle sync, seconds
+    @State private var audioDelay: Double = 0          // manual audio sync, seconds
+    @AppStorage(SubtitleStyle.Key.size) private var subSize = SubtitleStyle.defaultSize
+    @AppStorage(SubtitleStyle.Key.color) private var subColor = SubtitleStyle.defaultColor
+    @AppStorage(SubtitleStyle.Key.background) private var subBackground = SubtitleStyle.defaultBackground
     @State private var optionRow = 0                   // highlighted row in the options panel
     @State private var loadFailed = false              // playback couldn't start
     @State private var loadErrorMsg = ""
@@ -44,7 +50,8 @@ struct TVPlayerView: View {
     @State private var curMeta: PlaybackMeta?
 
     /// Which on-screen control is currently highlighted (driven by remote left/right, not SwiftUI focus).
-    private enum Control: Hashable { case close, back, play, fwd, audio, subs, prev, next, episodes }
+    private enum Control: Hashable { case close, back, play, fwd, audio, subs, aspect, prev, next, episodes }
+    private enum PanelKind { case audio, audioSettings, subtitles, subtitleSettings, aspect, episodes }
     @State private var selected: Control = .play
     private let plog = Logger(subsystem: "com.stremiox.app", category: "tvplayer")
 
@@ -62,6 +69,7 @@ struct TVPlayerView: View {
                     case MPVProperty.pause:
                         if let b = data as? Bool {
                             isPaused = b
+                            UIApplication.shared.isIdleTimerDisabled = !b   // hold the TV awake while playing; let it sleep when paused
                             if b { saveProgress(at: currentTime) }   // persist on pause
                         }
                     case MPVProperty.timePos:
@@ -114,6 +122,7 @@ struct TVPlayerView: View {
         .onAppear {
             if curURL == nil { curURL = url; curTitle = title; curMeta = meta }   // seed from initial
             showInfo = true; selected = .play; scheduleHide(); startLoadTimeout()
+            UIApplication.shared.isIdleTimerDisabled = true   // stop the Apple TV screensaver during playback
             if let m = curMeta {
                 if let engineResume = core.engineResumeSeconds(for: m) {
                     resumeSeconds = engineResume; maybeResume()       // engine library = source of truth
@@ -128,6 +137,7 @@ struct TVPlayerView: View {
             hideTask?.cancel(); loadTimeout?.cancel()
             saveProgress(at: currentTime)
             core.reportProgress(timeSeconds: currentTime, durationSeconds: duration)   // flush final position to the engine
+            UIApplication.shared.isIdleTimerDisabled = false   // let the screensaver resume once the player closes
         }
     }
 
@@ -144,7 +154,12 @@ struct TVPlayerView: View {
         }
         if showOptions {
             switch type {
-            case .menu: closePanel()
+            case .menu:
+                switch panelKind {                       // Back from a settings sub-panel returns to its list
+                case .audioSettings:    openPanel(.audio)
+                case .subtitleSettings: openPanel(.subtitles)
+                default:                closePanel()
+                }
             case .upArrow: moveOption(-1)
             case .downArrow: moveOption(1)
             case .select: activateOption()
@@ -181,6 +196,7 @@ struct TVPlayerView: View {
         c.append(.fwd)
         if !audioTracks.isEmpty { c.append(.audio) }
         c.append(.subs)
+        c.append(.aspect)
         if episodes.count > 1 { c.append(.episodes) }
         return c
     }
@@ -200,7 +216,10 @@ struct TVPlayerView: View {
         case .play:  toggle()
         case .prev:  playPrevious()
         case .next:  playNext()
-        case .audio, .subs, .episodes: openPanel()
+        case .audio:    openPanel(.audio)
+        case .subs:     openPanel(.subtitles)
+        case .aspect:   openPanel(.aspect)
+        case .episodes: openPanel(.episodes)
         }
     }
 
@@ -276,6 +295,7 @@ struct TVPlayerView: View {
                     HStack(spacing: Theme.Space.md) {
                         if !audioTracks.isEmpty { ctrlButton(.audio, "waveform") }
                         ctrlButton(.subs, "captions.bubble")
+                        ctrlButton(.aspect, "aspectratio")
                         if episodes.count > 1 { ctrlButton(.episodes, "list.bullet") }
                     }
                     .frame(maxWidth: .infinity, alignment: .trailing)
@@ -320,59 +340,158 @@ struct TVPlayerView: View {
 
     // MARK: - Options panel (audio / subtitles / episodes), driven by optionRow
 
-    private struct OptionRow: Identifiable { let id = UUID(); let label: String; let isSelected: Bool; let action: () -> Void }
+    private struct OptionRow: Identifiable {
+        let id = UUID()
+        let label: String
+        var detail: String = ""        // right-aligned secondary text (e.g. current value)
+        var isSelected: Bool = false
+        var isHeader: Bool = false     // section header, not focusable, skipped in navigation
+        var action: () -> Void = {}
+    }
 
+    /// Rows for the currently-open panel only, never mixed. Tracks are grouped by language; a "Settings"
+    /// row drills into a dedicated sub-panel (sync / size / colour for subtitles, sync for audio).
     private var optionRows: [OptionRow] {
-        var rows: [OptionRow] = []
-        for t in audioTracks {
-            rows.append(OptionRow(label: "Audio  ·  " + t.label, isSelected: t.selected) {
-                coordinator.player?.setAudioTrack(t.id); refreshTracksSoon()
-            })
-        }
-        rows.append(OptionRow(label: "Subtitles  ·  Off", isSelected: subtitleTracks.allSatisfy { !$0.selected }) {
-            coordinator.player?.setSubtitleTrack(-1); refreshTracksSoon()
-        })
-        for t in subtitleTracks {
-            rows.append(OptionRow(label: "Subtitles  ·  " + t.label, isSelected: t.selected) {
-                coordinator.player?.setSubtitleTrack(t.id); refreshTracksSoon()
-            })
-        }
-        if episodes.count > 1 {
-            for ep in episodes {
-                rows.append(OptionRow(label: "E\(ep.episodeNumber)  ·  \(ep.episodeTitle)", isSelected: ep.id == curMeta?.videoId) {
+        switch panelKind {
+        case .audio:
+            var rows = groupedTrackRows(audioTracks) { coordinator.player?.setAudioTrack($0); refreshTracksSoon() }
+            rows.append(OptionRow(label: "Audio Settings", detail: "›") { openPanel(.audioSettings) })
+            return rows
+        case .audioSettings:
+            let now = String(format: "%+.1fs", audioDelay)
+            var rows = [OptionRow(label: "Sync", isHeader: true),
+                        OptionRow(label: "Earlier  −0.1s", detail: now) { adjustAudioDelay(-0.1) },
+                        OptionRow(label: "Later  +0.1s", detail: now) { adjustAudioDelay(0.1) }]
+            if audioDelay != 0 { rows.append(OptionRow(label: "Reset") { adjustAudioDelay(-audioDelay) }) }
+            return rows
+        case .subtitles:
+            var rows = [OptionRow(label: "Off", isSelected: subtitleTracks.allSatisfy { !$0.selected }) {
+                coordinator.player?.setSubtitleTrack(-1); refreshTracksSoon()
+            }]
+            rows += groupedTrackRows(subtitleTracks) { coordinator.player?.setSubtitleTrack($0); refreshTracksSoon() }
+            rows.append(OptionRow(label: "Subtitle Settings", detail: "›") { openPanel(.subtitleSettings) })
+            return rows
+        case .subtitleSettings:
+            let now = String(format: "%+.1fs", subDelay)
+            var rows = [OptionRow(label: "Sync", isHeader: true),
+                        OptionRow(label: "Earlier  −0.1s", detail: now) { adjustSubDelay(-0.1) },
+                        OptionRow(label: "Later  +0.1s", detail: now) { adjustSubDelay(0.1) }]
+            if subDelay != 0 { rows.append(OptionRow(label: "Reset") { adjustSubDelay(-subDelay) }) }
+            rows.append(OptionRow(label: "Size", isHeader: true))
+            for s in SubtitleStyle.sizes { rows.append(OptionRow(label: s.label, isSelected: subSize == s.id) { setSubtitleSize(s.id) }) }
+            rows.append(OptionRow(label: "Colour", isHeader: true))
+            for c in SubtitleStyle.colors { rows.append(OptionRow(label: c.label, isSelected: subColor == c.id) { setSubtitleColor(c.id) }) }
+            rows.append(OptionRow(label: "Background", isHeader: true))
+            for b in SubtitleStyle.backgrounds { rows.append(OptionRow(label: b.label, isSelected: subBackground == b.id) { setSubtitleBackground(b.id) }) }
+            return rows
+        case .aspect:
+            let mode = coordinator.player?.videoSizeMode ?? "original"
+            return [
+                OptionRow(label: "Fit  ·  default", isSelected: mode == "original") { coordinator.player?.setVideoSize("original") },
+                OptionRow(label: "Fill  ·  crop to screen", isSelected: mode == "fill" || mode == "zoom") { coordinator.player?.setVideoSize("fill") },
+                OptionRow(label: "Stretch  ·  fill, distort", isSelected: mode == "stretch") { coordinator.player?.setVideoSize("stretch") },
+            ]
+        case .episodes:
+            return episodes.map { ep in
+                OptionRow(label: "E\(ep.episodeNumber)  ·  \(ep.episodeTitle)", isSelected: ep.id == curMeta?.videoId) {
                     play(episode: ep)
-                })
+                }
+            }
+        }
+    }
+
+    /// Group tracks by language so multiple same-language tracks read clearly (e.g. an "English" header
+    /// with two variants), instead of a flat list of identical "English" rows.
+    private func groupedTrackRows(_ tracks: [MPVTrack], select: @escaping (Int) -> Void) -> [OptionRow] {
+        let groups = Dictionary(grouping: tracks) { $0.lang.isEmpty ? "und" : $0.lang.lowercased() }
+        var rows: [OptionRow] = []
+        for code in groups.keys.sorted(by: { langName($0) < langName($1) }) {
+            let ts = groups[code]!
+            if ts.count == 1 {
+                let t = ts[0]
+                rows.append(OptionRow(label: langName(code), detail: t.title, isSelected: t.selected) { select(t.id) })
+            } else {
+                rows.append(OptionRow(label: langName(code), isHeader: true))
+                for (i, t) in ts.enumerated() {
+                    rows.append(OptionRow(label: t.title.isEmpty ? "Track \(i + 1)" : t.title, isSelected: t.selected) { select(t.id) })
+                }
             }
         }
         return rows
+    }
+
+    private func langName(_ code: String) -> String {
+        let c = code.lowercased()
+        if c.isEmpty || c == "und" { return "Unknown" }
+        return Locale.current.localizedString(forLanguageCode: c)?.capitalized ?? code.uppercased()
+    }
+
+    /// Nudge subtitle sync by `delta` seconds (rounded to 0.1); keeps the panel open to repeat.
+    private func adjustSubDelay(_ delta: Double) {
+        subDelay = ((subDelay + delta) * 10).rounded() / 10
+        coordinator.player?.setSubDelay(subDelay)
+    }
+    private func adjustAudioDelay(_ delta: Double) {
+        audioDelay = ((audioDelay + delta) * 10).rounded() / 10
+        coordinator.player?.setAudioDelay(audioDelay)
+    }
+    private func setSubtitleSize(_ id: String) { subSize = id; coordinator.player?.applySubtitleStyle() }
+    private func setSubtitleColor(_ id: String) { subColor = id; coordinator.player?.applySubtitleStyle() }
+    private func setSubtitleBackground(_ id: String) { subBackground = id; coordinator.player?.applySubtitleStyle() }
+
+    private var panelTitle: String {
+        switch panelKind {
+        case .audio:            return "Audio"
+        case .audioSettings:    return "Audio Settings"
+        case .subtitles:        return "Subtitles"
+        case .subtitleSettings: return "Subtitle Settings"
+        case .aspect:           return "Aspect Ratio"
+        case .episodes:         return "Episodes"
+        }
     }
 
     private var optionsPanel: some View {
         let rows = optionRows
         return HStack(spacing: 0) {
             Spacer()
-            ScrollViewReader { proxy in
-                ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(panelTitle)
+                    .font(Theme.Typography.sectionTitle).foregroundStyle(Theme.Palette.textPrimary)
+                    .padding(.horizontal, Theme.Space.xl).padding(.top, Theme.Space.xl).padding(.bottom, Theme.Space.sm)
+                ScrollViewReader { proxy in
+                    ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(Array(rows.enumerated()), id: \.element.id) { i, row in
-                            HStack {
-                                Text(row.label).lineLimit(1)
-                                    .foregroundStyle(i == optionRow ? Theme.Palette.canvas : Theme.Palette.textPrimary)
-                                Spacer()
-                                if row.isSelected {
-                                    Image(systemName: "checkmark")
-                                        .foregroundStyle(i == optionRow ? Theme.Palette.canvas : Theme.Palette.accent)
+                            if row.isHeader {
+                                Text(row.label.uppercased())
+                                    .font(Theme.Typography.eyebrow).tracking(1)
+                                    .foregroundStyle(Theme.Palette.textTertiary)
+                                    .padding(.horizontal, Theme.Space.lg).padding(.top, Theme.Space.md).padding(.bottom, 2)
+                                    .id(i)
+                            } else {
+                                HStack {
+                                    Text(row.label).lineLimit(1)
+                                        .foregroundStyle(i == optionRow ? Theme.Palette.canvas : Theme.Palette.textPrimary)
+                                    Spacer()
+                                    if row.isSelected {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(i == optionRow ? Theme.Palette.canvas : Theme.Palette.accent)
+                                    } else if !row.detail.isEmpty {
+                                        Text(row.detail)
+                                            .foregroundStyle(i == optionRow ? Theme.Palette.canvas.opacity(0.85) : Theme.Palette.textSecondary)
+                                    }
                                 }
+                                .padding(.horizontal, Theme.Space.lg).padding(.vertical, Theme.Space.sm)
+                                .background(i == optionRow ? Theme.Palette.accent : Color.clear)
+                                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+                                .id(i)
                             }
-                            .padding(.horizontal, Theme.Space.lg).padding(.vertical, Theme.Space.sm)
-                            .background(i == optionRow ? Theme.Palette.accent : Color.clear)
-                            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-                            .id(i)
                         }
                     }
                     .padding(Theme.Space.lg)
                 }
                 .onChange(of: optionRow) { _ in withAnimation { proxy.scrollTo(optionRow, anchor: .center) } }
+                }
             }
             .frame(width: 760)
             .frame(maxHeight: .infinity)
@@ -383,20 +502,24 @@ struct TVPlayerView: View {
     }
 
     private func moveOption(_ d: Int) {
-        let count = optionRows.count
-        guard count > 0 else { return }
-        optionRow = max(0, min(count - 1, optionRow + d))
+        let rows = optionRows
+        let selectable = rows.indices.filter { !rows[$0].isHeader }
+        guard !selectable.isEmpty else { return }
+        let cur = selectable.firstIndex(of: optionRow) ?? 0
+        optionRow = selectable[max(0, min(selectable.count - 1, cur + d))]
     }
     private func activateOption() {
         let rows = optionRows
-        guard optionRow >= 0, optionRow < rows.count else { return }
+        guard optionRow >= 0, optionRow < rows.count, !rows[optionRow].isHeader else { return }
         rows[optionRow].action()
     }
 
-    private func openPanel() {
+    private func openPanel(_ kind: PanelKind) {
+        panelKind = kind
         refreshTracks()
         hideTask?.cancel()
-        optionRow = optionRows.firstIndex { $0.isSelected } ?? 0
+        let rows = optionRows
+        optionRow = rows.firstIndex { $0.isSelected } ?? rows.firstIndex { !$0.isHeader } ?? 0
         withAnimation { showOptions = true }
     }
     private func closePanel() {
@@ -574,7 +697,7 @@ private struct RemoteCatcher: UIViewControllerRepresentable {
     }
 
     /// Owns the remote. Its root view is the only focusable; `preferredFocusEnvironments` points at it, so
-    /// the focus system always has an explicit target to keep — or pull — focus onto the catcher, even when
+    /// the focus system always has an explicit target to keep, or pull, focus onto the catcher, even when
     /// a directional press would otherwise move focus to nothing (which left the player deaf to the remote).
     final class CatchVC: UIViewController {
         var onPress: ((UIPress.PressType) -> Void)?
@@ -604,7 +727,7 @@ private struct RemoteCatcher: UIViewControllerRepresentable {
         /// Lock focus on the catcher. It is the ONLY focusable while playing and it handles every remote
         /// input itself (hidden state, control-bar navigation, AND the audio/subtitle panel), so it never
         /// needs to yield focus. Without this, a directional press knocks focus to nil and the controls
-        /// stop responding until an async re-grab catches up — a race the input never wins under load.
+        /// stop responding until an async re-grab catches up, a race the input never wins under load.
         override func shouldUpdateFocus(in context: UIFocusUpdateContext) -> Bool {
             if isViewLoaded, view.window != nil, context.nextFocusedItem !== view {
                 return false

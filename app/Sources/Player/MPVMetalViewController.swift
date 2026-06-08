@@ -344,6 +344,12 @@ final class MPVMetalViewController: UIViewController {
     func setAudioTrack(_ id: Int) { setString(MPVProperty.aid, id < 0 ? "no" : String(id)) }
     func setSubtitleTrack(_ id: Int) { setString(MPVProperty.sid, id < 0 ? "no" : String(id)) }
 
+    /// Manual subtitle sync, in seconds (positive = subtitles appear later). Maps to mpv `sub-delay`.
+    func setSubDelay(_ seconds: Double) { setString("sub-delay", String(format: "%.2f", seconds)) }
+
+    /// Manual audio sync, in seconds. Maps to mpv `audio-delay`.
+    func setAudioDelay(_ seconds: Double) { setString("audio-delay", String(format: "%.2f", seconds)) }
+
     /// Current media summary for the player's metadata line: encoded video height (e.g. 2160) and the
     /// active audio codec (e.g. "eac3"). Both can be 0/"" early in load, before the first frame.
     func mediaSummary() -> (height: Int, audioCodec: String) {

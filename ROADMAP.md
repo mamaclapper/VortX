@@ -1,86 +1,89 @@
 # Roadmap
 
-A community build, no fixed schedule. This is the plan in priority order. The full feature checklist is in
-[docs/FEATURE-PARITY.md](docs/FEATURE-PARITY.md); the iOS plan in [docs/REBASE-iOS.md](docs/REBASE-iOS.md).
+A community build, no fixed schedule, in priority order. Full feature checklist:
+[docs/FEATURE-PARITY.md](docs/FEATURE-PARITY.md); iOS plan: [docs/REBASE-iOS.md](docs/REBASE-iOS.md).
 
-## In progress
+**Guiding bet:** the player is the differentiator. The engine (`stremio-core`) and addon protocol stay; we
+build the best native UI and the best libmpv playback on top, then take it to every platform. Streams come
+from addons + debrid; the on-device server stays optional/advanced.
 
-### Phase 1: player quality
-Bring the player to the top of its class. Done so far: a redesigned cinematic player UI, a live metadata
-line (resolution, HDR, audio), reliable focus controls, aggressive caching, and broad subtitle script
-coverage. Building next:
+## Phase 0: Finish the tvOS player (now)
 
-- HDR and Dolby Vision passthrough, plus HDR to SDR tonemapping with a target-nits setting.
-- Full subtitle styling (font, outline, box, margin, alignment), dual subtitle tracks, per-title delay.
-- Smart track selection: auto audio and subtitle by language, forced-subtitle override, rejection lists.
-- Skip intro and outro with an on-screen button.
-- Anime upscaling shaders with quality presets and content auto-detection.
-- A smooth-motion (judder reduction) toggle.
+- Reliable controls, native tab bar, server config + status, Test (done).
+- Options split into **Audio / Subtitles / Aspect / Episodes** (separate, titled panels) (done).
+- **Subtitle sync** (±, live value, reset) and **aspect modes** (Fit / Fill / Stretch) (done).
+- **All-language subtitle fonts** (Latin/Cyrillic, CJK, Arabic, Hebrew, Thai, Devanagari fallback) (done).
+- **Tracks grouped by language** (audio + subtitles) (building).
+- **Subtitle Settings** sub-panel: sync, size, colour, transparency (building).
+- **Audio Settings** sub-panel: audio sync/delay (building).
+- **Catalog titles** read the addon's real name + type (e.g. "Trending Movies", not "Trending Trending").
 
-### Native iPhone and iPad client
-Rebuild iOS as a native client on the engine, like the Apple TV app, so it no longer depends on a hosted
-web UI. Done: the engine compiles for iOS. Next: share the engine and design layers into the iOS target,
-build the touch screens, then a native touch player. Retire the web host at parity.
+## Phase 1: Player + sources, deeper (tvOS)
 
-## Next
+### Source intelligence (highest-value)
+- Trust filter (drop cam-rips, dead torrents, wrong-episode, fake quality labels).
+- Stream ranking + **Auto-Play Best Stream**.
+- Regex/keyword stream tags and rejection lists.
+- Native in-app debrid keys (multiple services, uniform cache check) alongside addons.
+- Stream preloading / cache-ahead so playback doesn't buffer.
 
-### Stream selection and sources
-- Add debrid API keys directly in the app, across multiple services, with a uniform cache check.
-- Smart stream ranking that filters fakes and mislabeled sources and floats the best cached, high-quality
-  source to the top, with a safety filter.
-- Direct torrent streaming without a debrid account.
+### Subtitles + tracks
+- Subtitle source aggregation (OpenSubtitles-style) with dedupe, on top of subtitle addons.
+- Smart track auto-selection (preferred audio/subtitle language, forced-subtitle override).
+- Skip intro/outro with an on-screen button; auto next-episode.
 
-### Our own streaming server
-Replace the bundled server with our own, unlocking Usenet, live TV, full background caching, and
-transcoding. Shipped behind an opt-in branch so current users are undisturbed.
+### Playback quality
+- HDR / Dolby Vision passthrough + HDR→SDR tonemapping with a target-nits setting.
+- Audio passthrough (TrueHD / DTS-HD MA / Atmos bitstreaming) for receivers.
+- Anime upscaling shaders with quality presets (frame-interpolation is out of scope on this hardware).
+- Casting: AirPlay first.
 
-## Planned
+### Look & feel
+- Theme system: accent + full colour theming, presets, (later) custom layout.
 
-### Metadata and tracking
-Rich metadata and ratings, watch-history tracking and scrobbling with automatic episode tracking, a hero
-banner with daily recommendations and Discover rails, add/remove Library on the detail page, and a
-last-used source per title.
+### Source types
+- Downloads (debrid/HTTP → local, play offline).
+- Usenet (via the server/addon path).
 
-### Look and feel (customizable)
-A customizable theme (accent color and full color theming, multiple presets and layouts, custom fonts), a
-customizable player layout, profiles with parental PIN, localization, and remote remapping.
+## Phase 2: iPhone / iPad parity
 
-### Casting
-AirPlay first, then Chromecast, DLNA, and Roku.
+Rebuild iOS/iPadOS as a native client on the engine (off the hosted web UI): share the engine + design +
+player, build the touch screens and a native touch player, carry the theme system over, add an iPad layout,
+retire the web host at parity.
 
-### Live TV
-Playlist and provider sources, a channel browser with logos and favorites, an EPG guide grid, catchup,
-and recording.
+## Phase 3: Ground-up project (new name, every device)
 
-### Social and advanced
-Watch together (synced playback, chat, on-screen cursors, draw-over-video), multiview, and webhooks.
+A fresh app for Apple, Android, Windows, Linux, and web. Reuse a shared Rust core as the brain, build our
+own UI per platform, and build **our own streaming server** (torrent + Usenet fetch, remux, full
+cache-ahead): the genuinely high-value piece. Phased: shared core + UI first, server in parallel.
 
-### More platforms
-macOS first, since it shares the SwiftUI and engine code, then Windows and Linux.
+## Cross-cutting (slot in early)
 
-### Apple TV extras and infrastructure
-Top Shelf Continue Watching (subject to sideloading constraints), an external-player handoff, interface
-scaling, and an acknowledgements screen. Bridge tests and a CI build (which unblocks once our own server
-lands; engine code scanning is already wired up).
+- **Distribution / auto-update:** a self-hosted update source so the app updates itself (sideloaded certs
+  expire; manual re-sideload caps reach).
+- First-run **onboarding** (addons + debrid setup).
+- **Profiles** (per-user, parental PIN) and **Trakt** sync / scrobbling / release calendar.
+
+## Later
+
+- Live TV (playlist/provider sources, EPG grid, catchup, recording).
+- Watch-together (synced playback, chat), multiview, webhooks.
+- Apple TV Top Shelf, external-player handoff, interface scaling, CI build.
 
 ## Done
 
 ### Apple TV (native on the engine)
-- Home (real Continue Watching and every catalog), Discover, Library, Detail, the full source list, Search,
-  and Add-ons, all driven by the engine.
-- Watched markers by episode, season, or whole series; engine-sourced resume; live progress.
-- A cinematic UI redesign on a shared design system, plus a redesigned player.
-- Reliability fixes: sign-in seeds the engine; Discover and Library load; full-screen player; reliable
-  detail loading; Back returns to the tab; first rows load their posters; aggressive caching; broad
-  subtitle script coverage.
+- Home (real Continue Watching + every catalog), Discover, Library, Detail, full source list, Search,
+  Add-ons: all engine-driven; watched markers + engine resume + live progress.
+- Cinematic UI on a shared design system; redesigned player.
+- Reliability: sign-in seeds the engine; full-screen player with reliable focus/controls; Back returns to
+  the tab; posters load; aggressive caching; broad subtitle script coverage; smooth 4K.
 
-### Cross-platform
-- Sign-in token in the Keychain with a fallback; the engine builds for both tvOS and iOS.
+### Cross-platform / project
+- Sign-in token in the Keychain; engine builds for tvOS + iOS.
+- Unsigned sideloaded builds with checksums; security policy, private vulnerability reporting, Dependabot,
+  secret scanning + push protection, engine code scanning.
 
-### Project
-- Unsigned, sideloaded builds with checksums; a security policy, private vulnerability reporting,
-  Dependabot, secret scanning with push protection, and engine code scanning.
-
-### iPhone and iPad (interim)
-- Hosts a web UI with a native libmpv player and an external-player handoff, being replaced by the native
-  client above.
+### iPhone / iPad (interim)
+- Hosts a web UI with a native libmpv player + external-player handoff: being replaced by the native
+  client in Phase 2.
