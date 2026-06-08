@@ -252,7 +252,7 @@ struct CoreStreamList: View {
     var meta: PlaybackMeta? = nil
     @EnvironmentObject private var core: CoreBridge
     @State private var sourceFilter: String? = nil
-    @EnvironmentObject private var presenter: PlayerPresenter   // root-level player overlay (focus-safe)
+    @EnvironmentObject private var account: StremioAccount   // re-injected into the player window
 
     var body: some View {
         let groups = core.streamGroups()
@@ -279,13 +279,19 @@ struct CoreStreamList: View {
         }
     }
 
-    /// Present the player as a root-level overlay (focus-safe on tvOS), after wiring the engine and
-    /// preparing torrents. See RootTabView / PlayerPresenter.
+    /// Present the player in a dedicated key window (focus-safe on tvOS), after wiring the engine and
+    /// preparing torrents. See PlayerWindow.
     private func play(_ stream: CoreStream) {
         guard let url = stream.playableURL else { return }
         core.loadEnginePlayer(for: stream)
         prepareTorrent(stream)
-        presenter.request = PlaybackRequest(url: url, title: title, meta: meta)
+        // Present in a dedicated key window so the player owns the tvOS focus environment (no tab-bar
+        // leak). Environment objects are re-injected because the window is a separate SwiftUI tree.
+        PlayerWindow.shared.present(AnyView(
+            TVPlayerView(url: url, title: title, meta: meta, onClose: { PlayerWindow.shared.dismiss() })
+                .environmentObject(account)
+                .environmentObject(core)
+        ))
     }
 
     private func filterBar(_ groups: [CoreStreamSourceGroup], total: Int) -> some View {
