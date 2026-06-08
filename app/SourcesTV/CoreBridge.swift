@@ -203,7 +203,6 @@ final class CoreBridge: ObservableObject {
     /// Load a title's meta + streams. For a series episode, pass the episode's video id as the stream
     /// path so the engine fetches that episode's streams.
     func loadMeta(type: String, id: String, streamType: String? = nil, streamId: String? = nil) {
-        DispatchQueue.main.async { [weak self] in self?.metaDetails = nil } // avoid showing the previous title
         var args: [String: Any] = [
             "metaPath": ["resource": "meta", "type": type, "id": id, "extra": []],
             "guessStream": true,
@@ -214,6 +213,12 @@ final class CoreBridge: ObservableObject {
             args["streamPath"] = NSNull()
         }
         dispatch(action: ["action": "Load", "args": ["model": "MetaDetails", "args": args]], field: "meta_details")
+        // If the engine already had this exact meta loaded, ActionLoad is a no-op (eq_update) and no
+        // meta_details NewState fires, so the page would stick on the spinner. Read the current state:
+        // keep it when the requested meta is already ready, otherwise clear to the spinner until it loads.
+        let current = decode(CoreMetaDetails.self, field: "meta_details")
+        let alreadyLoaded = current?.meta?.id == id
+        DispatchQueue.main.async { [weak self] in self?.metaDetails = alreadyLoaded ? current : nil }
     }
 
     func unloadMeta() {

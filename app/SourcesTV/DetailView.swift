@@ -10,24 +10,30 @@ struct DetailView: View {
     @EnvironmentObject private var core: CoreBridge
 
     var body: some View {
-        ScrollView {
-            if let meta = core.metaDetails?.meta {
-                VStack(alignment: .leading, spacing: Theme.Space.xl) {
-                    hero(meta)
-                    if type == "series", let videos = meta.videos, !videos.isEmpty {
-                        CoreSeasonedEpisodes(meta: meta, videos: videos,
-                                             watched: core.metaDetails?.watchedIds ?? [])
-                    } else {
-                        CoreStreamList(title: meta.name,
-                                       meta: PlaybackMeta(libraryId: meta.id, videoId: meta.id, type: type,
-                                                          name: meta.name, poster: meta.poster,
-                                                          season: nil, episode: nil))
-                            .padding(.horizontal, Theme.Space.screenEdge)
+        ScrollViewReader { proxy in
+            ScrollView {
+                if let meta = core.metaDetails?.meta {
+                    VStack(alignment: .leading, spacing: Theme.Space.xl) {
+                        hero(meta) { withAnimation { proxy.scrollTo("detailContent", anchor: .top) } }
+                        Group {
+                            if type == "series", let videos = meta.videos, !videos.isEmpty {
+                                CoreSeasonedEpisodes(meta: meta, videos: videos,
+                                                     watched: core.metaDetails?.watchedIds ?? [])
+                            } else {
+                                CoreStreamList(title: meta.name,
+                                               meta: PlaybackMeta(libraryId: meta.id, videoId: meta.id, type: type,
+                                                                  name: meta.name, poster: meta.poster,
+                                                                  season: nil, episode: nil))
+                                    .padding(.horizontal, Theme.Space.screenEdge)
+                            }
+                        }
+                        .id("detailContent")
                     }
+                    .padding(.bottom, Theme.Space.xl)
+                } else {
+                    // Focusable so Back pops this view instead of exiting the app while it loads.
+                    ProgressView().controlSize(.large).tint(Theme.Palette.accent).padding(120).focusable()
                 }
-                .padding(.bottom, Theme.Space.xl)
-            } else {
-                ProgressView().controlSize(.large).tint(Theme.Palette.accent).padding(120)
             }
         }
         .background(Theme.Palette.canvas.ignoresSafeArea())
@@ -37,7 +43,7 @@ struct DetailView: View {
 
     /// Full-bleed backdrop with a canvas-blended gradient and the title / metadata / synopsis on the
     /// lower band. The serif title is the editorial signature.
-    private func hero(_ m: CoreMetaItem) -> some View {
+    private func hero(_ m: CoreMetaItem, scrollToContent: @escaping () -> Void) -> some View {
         ZStack(alignment: .bottomLeading) {
             AsyncImage(url: URL(string: m.background ?? m.poster ?? "")) { phase in
                 switch phase {
@@ -67,6 +73,14 @@ struct DetailView: View {
                         .lineLimit(3).lineSpacing(2)
                         .frame(maxWidth: 1000, alignment: .leading)
                 }
+                // On-screen focusable anchor: grabs initial focus on push (so Back pops instead of
+                // exiting), and jumps to the episodes / sources below.
+                Button(action: scrollToContent) {
+                    Label(type == "series" ? "Episodes" : "Watch",
+                          systemImage: type == "series" ? "list.bullet" : "play.fill")
+                }
+                .buttonStyle(PrimaryActionStyle())
+                .padding(.top, Theme.Space.xs)
             }
             .padding(.horizontal, Theme.Space.screenEdge)
             .padding(.bottom, Theme.Space.lg)
