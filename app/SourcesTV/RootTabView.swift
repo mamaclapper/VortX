@@ -37,7 +37,7 @@ struct RootView: View {
 ///
 /// Uses the native tvOS `TabView` so the top tab bar gets correct focus behaviour for free: tabs switch
 /// as focus crosses them, and focus moves cleanly between the tab bar and the page content (up/down). The
-/// player no longer depends on the shell being a custom bar — it locks focus on its own catcher while up,
+/// player no longer depends on the shell being a custom bar, it locks focus on its own catcher while up,
 /// so the native tab bar can't steal the remote.
 struct RootTabView: View {
     @EnvironmentObject private var account: StremioAccount

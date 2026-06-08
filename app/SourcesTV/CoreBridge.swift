@@ -485,10 +485,28 @@ final class CoreBridge: ObservableObject {
         for addon in ctx.profile.addons {
             for catalog in addon.manifest.catalogs {
                 let key = Self.catalogKey(base: addon.transportUrl, type: catalog.type, id: catalog.id)
-                map[key] = catalog.name ?? catalog.id
+                map[key] = Self.displayCatalogTitle(name: catalog.name ?? catalog.id, type: catalog.type)
             }
         }
         return map
+    }
+
+    /// Distinguish same-named movie/series catalogs, addons routinely name both "Trending", which renders
+    /// as two identical "Trending" rows. Append the content type unless the name already says it (so an
+    /// already-descriptive "… Trending Movies" isn't doubled).
+    private static func displayCatalogTitle(name: String, type: String) -> String {
+        let lower = name.lowercased()
+        let t = type.lowercased()
+        let label: String
+        switch t {
+        case "movie":   label = "Movies"
+        case "series":  label = "Shows"
+        case "channel": label = "Channels"
+        case "tv":      label = "TV"
+        default:        return name
+        }
+        if lower.contains(t) || lower.contains(label.lowercased()) { return name }
+        return "\(name) \(label)"
     }
 
     private static func catalogKey(base: String, type: String, id: String) -> String {
