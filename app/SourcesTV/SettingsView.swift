@@ -9,6 +9,9 @@ struct SettingsView: View {
     @AppStorage(SubtitleStyle.Key.size) private var subSize = SubtitleStyle.defaultSize
     @AppStorage(SubtitleStyle.Key.color) private var subColor = SubtitleStyle.defaultColor
     @AppStorage(SubtitleStyle.Key.background) private var subBackground = SubtitleStyle.defaultBackground
+    @AppStorage(TrackPreferences.Key.forced) private var prefForced = TrackPreferences.ForcedPolicy.forced.rawValue
+    @AppStorage(TrackPreferences.Key.audio) private var prefAudioLang = TrackPreferences.deviceLanguages.first ?? "en"
+    @AppStorage(TrackPreferences.Key.subtitle) private var prefSubLang = TrackPreferences.deviceLanguages.first ?? "en"
 
     var body: some View {
         NavigationStack {
@@ -17,6 +20,7 @@ struct SettingsView: View {
                     Text("Settings").screenTitleStyle()
                     accountSection
                     serverSection
+                    audioSubtitleSection
                     subtitleSection
                     aboutSection
                 }
@@ -100,10 +104,22 @@ struct SettingsView: View {
         switch serverOnline { case .some(true): return "Online"; case .some(false): return "Offline"; default: return "Checking…" }
     }
 
-    // MARK: Subtitles
+    // MARK: Audio & subtitle preferences
+
+    private var audioSubtitleSection: some View {
+        section("Audio & Subtitles") {
+            choiceRow("Audio language", TrackPreferences.commonLanguages, selection: $prefAudioLang)
+            choiceRow("Subtitle language", TrackPreferences.commonLanguages, selection: $prefSubLang)
+            choiceRow("Subtitles", TrackPreferences.ForcedPolicy.allCases.map { ($0.rawValue, $0.label) }, selection: $prefForced)
+            Text("The player auto-picks these when a title starts. Forced shows only foreign-dialogue captions; Always shows full subtitles in your language. Foreign-language titles always get full subtitles so you can follow.")
+                .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
+        }
+    }
+
+    // MARK: Subtitle style
 
     private var subtitleSection: some View {
-        section("Subtitles") {
+        section("Subtitle Style") {
             choiceRow("Size", SubtitleStyle.sizes.map { ($0.id, $0.label) }, selection: $subSize)
             choiceRow("Color", SubtitleStyle.colors.map { ($0.id, $0.label) }, selection: $subColor)
             choiceRow("Background", SubtitleStyle.backgrounds.map { ($0.id, $0.label) }, selection: $subBackground)

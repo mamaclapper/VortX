@@ -34,6 +34,13 @@ struct TrackPreferences: Equatable {
         static let reject = "stremiox.tracks.reject"
     }
 
+    /// Curated language choices for the settings UI (id is the stored ISO code).
+    static let commonLanguages: [(id: String, label: String)] = [
+        ("en", "English"), ("es", "Spanish"), ("fr", "French"), ("de", "German"),
+        ("it", "Italian"), ("pt", "Portuguese"), ("hi", "Hindi"), ("ja", "Japanese"),
+        ("ko", "Korean"), ("zh", "Chinese"), ("ar", "Arabic"), ("ru", "Russian"),
+    ]
+
     /// The device's preferred languages as ISO codes, deduplicated, used as the default.
     static var deviceLanguages: [String] {
         var seen = Set<String>(); var out: [String] = []
