@@ -284,9 +284,14 @@ struct CoreStreamList: View {
 
             if streamCount > 0 {
                 if groups.count > 1 { filterBar(groups, total: streamCount) }
-                VStack(spacing: Theme.Space.sm) {
+                // LazyVStack so only the on-screen rows are built: a popular title can return 2000+
+                // streams, and a plain VStack instantiated them all at once, which OOM-crashes the Apple
+                // TV mid-load. Enumerated ids avoid a duplicate-id ForEach crash if two sources collide.
+                LazyVStack(spacing: Theme.Space.sm) {
                     ForEach(visible) { group in
-                        ForEach(group.streams) { stream in streamRow(group.addon, stream) }
+                        ForEach(Array(group.streams.enumerated()), id: \.offset) { _, stream in
+                            streamRow(group.addon, stream)
+                        }
                     }
                 }
             } else if loadingAddons {
