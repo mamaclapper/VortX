@@ -3,6 +3,7 @@ import SwiftUI
 /// Search across every installed addon, on the engine (CatalogsWithExtra with a search extra).
 struct SearchView: View {
     @EnvironmentObject private var core: CoreBridge
+    @EnvironmentObject private var theme: ThemeManager
     @EnvironmentObject private var account: StremioAccount
     @State private var query = ""
     private let columns = Array(repeating: GridItem(.fixed(kPosterWidth), spacing: Theme.Space.lg), count: 6)

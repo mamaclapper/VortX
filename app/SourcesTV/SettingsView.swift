@@ -5,6 +5,7 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var account: StremioAccount
     @EnvironmentObject private var core: CoreBridge
+    @EnvironmentObject private var theme: ThemeManager
     @State private var serverOnline: Bool?
     @AppStorage(SubtitleStyle.Key.size) private var subSize = SubtitleStyle.defaultSize
     @AppStorage(SubtitleStyle.Key.color) private var subColor = SubtitleStyle.defaultColor
@@ -20,6 +21,7 @@ struct SettingsView: View {
                     Text("Settings").screenTitleStyle()
                     accountSection
                     serverSection
+                    appearanceSection
                     audioSubtitleSection
                     subtitleSection
                     aboutSection
@@ -102,6 +104,32 @@ struct SettingsView: View {
     }
     private var serverText: String {
         switch serverOnline { case .some(true): return "Online"; case .some(false): return "Offline"; default: return "Checking…" }
+    }
+
+    // MARK: Appearance (accent + chrome)
+
+    private var appearanceSection: some View {
+        section("Appearance") {
+            Text("Accent").font(Theme.Typography.cardTitle).foregroundStyle(Theme.Palette.textPrimary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Theme.Space.md) {
+                    ForEach(ThemeManager.accents) { opt in
+                        Button { theme.accentID = opt.id } label: {
+                            Circle().fill(opt.base).frame(width: 58, height: 58)
+                                .overlay(Circle().strokeBorder(Theme.Palette.textPrimary,
+                                                               lineWidth: theme.accentID == opt.id ? 5 : 0))
+                        }
+                        .buttonStyle(CardFocusStyle())
+                    }
+                }
+                .padding(.vertical, Theme.Space.xs)
+            }
+            choiceRow("Background", [("warm", "Warm"), ("oled", "OLED Black")],
+                      selection: Binding(get: { theme.oled ? "oled" : "warm" },
+                                         set: { theme.oled = ($0 == "oled") }))
+            Text("Accent recolors focus, selection, and progress across the app. OLED Black uses true black, best on AMOLED panels.")
+                .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
+        }
     }
 
     // MARK: Audio & subtitle preferences

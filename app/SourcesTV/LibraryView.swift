@@ -4,6 +4,7 @@ import SwiftUI
 /// type + sort filters. Auto-refreshes as the library changes (add/remove/mark watched), no reload.
 struct LibraryView: View {
     @EnvironmentObject private var core: CoreBridge
+    @EnvironmentObject private var theme: ThemeManager
     @EnvironmentObject private var account: StremioAccount
     private let columns = Array(repeating: GridItem(.fixed(kPosterWidth), spacing: Theme.Space.lg), count: 6)
 

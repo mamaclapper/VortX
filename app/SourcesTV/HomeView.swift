@@ -4,6 +4,7 @@ import SwiftUI
 /// rail plus every catalog of every installed addon, on the StremioX design system (Theme.swift).
 struct HomeView: View {
     @EnvironmentObject private var core: CoreBridge
+    @EnvironmentObject private var theme: ThemeManager
     @EnvironmentObject private var account: StremioAccount
 
     var body: some View {
@@ -57,6 +58,7 @@ struct RailHeader: View {
 /// resume-progress stripe on each poster.
 struct CoreContinueWatchingRow: View {
     let items: [CoreCWItem]
+    @EnvironmentObject private var theme: ThemeManager   // observe so the rail's cards repaint on a theme change
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.md) {
@@ -80,6 +82,7 @@ struct CoreContinueWatchingRow: View {
 /// One engine catalog row from the board (all installed-addon catalogs).
 struct CoreCatalogRowView: View {
     let row: CoreBoardRow
+    @EnvironmentObject private var theme: ThemeManager
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.md) {

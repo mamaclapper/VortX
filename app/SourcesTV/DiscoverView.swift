@@ -4,6 +4,7 @@ import SwiftUI
 /// genre, see the full grid. Each chip carries the engine's own `request`, dispatched back on tap.
 struct DiscoverView: View {
     @EnvironmentObject private var core: CoreBridge
+    @EnvironmentObject private var theme: ThemeManager
     @EnvironmentObject private var account: StremioAccount
     private let columns = Array(repeating: GridItem(.fixed(kPosterWidth), spacing: Theme.Space.lg), count: 6)
 

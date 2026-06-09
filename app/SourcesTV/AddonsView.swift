@@ -5,6 +5,7 @@ import SwiftUI
 struct AddonsView: View {
     @EnvironmentObject private var account: StremioAccount
     @EnvironmentObject private var core: CoreBridge
+    @EnvironmentObject private var theme: ThemeManager
 
     var body: some View {
         NavigationStack {

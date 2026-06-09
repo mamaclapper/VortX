@@ -12,16 +12,18 @@ enum Theme {
         private static func rgb(_ r: Double, _ g: Double, _ b: Double) -> Color {
             Color(.sRGB, red: r, green: g, blue: b, opacity: 1)
         }
-        static let canvas      = rgb(0.082, 0.071, 0.055)   // #15120E app background
-        static let surface1    = rgb(0.129, 0.110, 0.086)   // #211C16 rows, cards, panels
-        static let surface2    = rgb(0.176, 0.149, 0.114)   // #2D261D chips, controls
-        static let surface3    = rgb(0.227, 0.192, 0.153)   // #3A3127 hover / selected fill
-        static let hairline    = rgb(0.251, 0.212, 0.161)   // #403629 dividers only
+        // Chrome is user-themeable via ThemeManager (warm near-black by default, true black on OLED).
+        static var canvas: Color   { ThemeManager.shared.canvas }   // app background
+        static var surface1: Color { ThemeManager.shared.surface1 } // rows, cards, panels
+        static var surface2: Color { ThemeManager.shared.surface2 } // chips, controls
+        static var surface3: Color { ThemeManager.shared.surface3 } // hover / selected fill
+        static var hairline: Color { ThemeManager.shared.hairline } // dividers only
         static let textPrimary   = rgb(0.965, 0.945, 0.914) // #F6F1E9
         static let textSecondary = rgb(0.737, 0.694, 0.631) // #BCB1A1
         static let textTertiary  = rgb(0.549, 0.510, 0.451) // #8C8273
-        static let accent      = rgb(0.949, 0.471, 0.294)   // #F2784B focus / selection / primary / progress
-        static let accentBright = rgb(1.000, 0.569, 0.388)  // #FF9163 focus glow highlight
+        // Accent is user-themeable via ThemeManager (8 curated accents). accentSoft / onAccent follow it.
+        static var accent: Color { ThemeManager.shared.accent }             // focus / selection / primary / progress
+        static var accentBright: Color { ThemeManager.shared.accentBright } // focus glow highlight
         static var accentSoft: Color { accent.opacity(0.18) }
         static var onAccent: Color { rgb(0.106, 0.067, 0.043) } // dark warm ink on the ember fill
         static let danger = rgb(0.851, 0.318, 0.278)            // #D9514C destructive (log out, remove)
@@ -96,6 +98,7 @@ private struct CardFocusContent: View {
     let scale: CGFloat
     @Environment(\.isFocused) private var focused
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @EnvironmentObject private var theme: ThemeManager   // observe so a theme change repaints this style
     var body: some View {
         let lifted = focused && !reduceMotion
         configuration.label
@@ -118,6 +121,7 @@ private struct PrimaryActionContent: View {
     let configuration: ButtonStyleConfiguration
     @Environment(\.isFocused) private var focused
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @EnvironmentObject private var theme: ThemeManager   // observe so a theme change repaints this style
     var body: some View {
         configuration.label
             .font(Theme.Typography.label)
@@ -145,6 +149,7 @@ private struct RowFocusContent: View {
     let configuration: ButtonStyleConfiguration
     @Environment(\.isFocused) private var focused
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @EnvironmentObject private var theme: ThemeManager   // observe so a theme change repaints this style
     var body: some View {
         configuration.label
             .background(focused ? Theme.Palette.surface2 : Theme.Palette.surface1,
