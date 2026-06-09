@@ -28,7 +28,7 @@ Every source your addons return, with their exact details, filterable by quality
 
 ![Streams](docs/screenshots/streams.png)
 
-A clean, full-screen libmpv player with resume, audio, and subtitle controls:
+A full-screen libmpv player: a seekable scrubber with hold-to-seek, audio and subtitle tracks with sync, aspect modes, and resume:
 
 ![Player](docs/screenshots/player.png)
 
@@ -50,7 +50,8 @@ A few things the Apple TV app does:
 - Title pages with a backdrop, a season picker, and episode thumbnails.
 - Watched and unwatched markers, and you can mark things watched (or back to unwatched, for a rewatch) by episode, by season, or for a whole series.
 - Stream lists grouped by addon, showing each addon's text exactly as it sends it: quality, size, codec, HDR, source.
-- The libmpv player: fit by default plus zoom and stretch, audio and subtitle track picking, subtitle styling, speed, and resume.
+- The libmpv player: a seekable scrubber with continuous hold-to-seek, fit / zoom / stretch aspect modes, audio and subtitle track selection with sync adjustment, subtitle styling, jump-to-start, previous / next and a direct episode list for series, playback speed, and resume.
+- The detail page shows how many of your add-ons have answered while streams load ("Loaded 8/12 add-ons"), so you know whether to keep waiting.
 - Point it at your own streaming server if you run one.
 
 ## Installing
@@ -113,8 +114,6 @@ The plan for upcoming work (the native iPhone and iPad client on the engine, our
 
 ## Known issues
 
-- **Some subtitles show as blocks.** Subtitles in certain scripts can render as empty boxes. This is a font-coverage issue and a fix is in progress; trying a different subtitle source can help in the meantime.
-- **Occasional playback stutter.** Some high-bitrate or 4K streams can hitch depending on the stream and your network. Under investigation.
 - **iPhone and iPad follow Stremio's live web.** The iOS app hosts Stremio's live web interface, so a Stremio web update can occasionally disrupt it. The native iOS client on the roadmap removes this dependency.
 - **Unsigned builds.** You re-sign the IPA yourself, and depending on the signing method, reinstalling can require signing in again.
 
