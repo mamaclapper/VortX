@@ -12,7 +12,7 @@ struct LibraryView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                BrowseHeroBackdrop(model: focusModel, detailsTop: 230)
+                BrowseHeroBackdrop(model: focusModel, detailsTop: 300)
                 ScrollView {
                     VStack(alignment: .leading, spacing: Theme.Space.md) {
                         Text("Library").screenTitleStyle().padding(.horizontal, Theme.Space.screenEdge)
@@ -21,7 +21,7 @@ struct LibraryView: View {
                             if library.catalog.isEmpty {
                                 hint("Your library is empty. Add titles to your library in Stremio and they will show up here.")
                             } else {
-                                Color.clear.frame(height: 330)
+                                Color.clear.frame(height: 380)
                                 grid(library.catalog)
                             }
                         } else if account.isSignedIn {

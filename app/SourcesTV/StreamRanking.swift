@@ -80,6 +80,55 @@ enum StreamRanking {
             .sorted { score($0.stream) > score($1.stream) }
     }
 
+    /// The resolution tiers that actually have playable sources, in fixed order, for the first
+    /// level of the quality picker. Everything that is not 4K/1080p/720p lands in "Others".
+    static func tiers(_ groups: [CoreStreamSourceGroup]) -> [String] {
+        let playable = groups.flatMap { $0.streams }.filter { $0.playableURL != nil }
+        var present = Set<String>()
+        for s in playable { present.insert(tier(of: s)) }
+        return ["4K", "1080p", "720p", "Others"].filter { present.contains($0) }
+    }
+
+    /// Second level of the quality picker: distinct flavor variants inside one resolution tier
+    /// ("Dolby Vision · Remux", "HDR · Atmos", "BluRay"), best variant of each, best-first, capped.
+    static func variantOptions(_ groups: [CoreStreamSourceGroup], tier wanted: String)
+        -> [(label: String, stream: CoreStream)] {
+        let playable = groups.flatMap { $0.streams }
+            .filter { $0.playableURL != nil && tier(of: $0) == wanted }
+        var best: [String: (score: Int, stream: CoreStream)] = [:]
+        for s in playable {
+            let t = qualityText(s)
+            var tags: [String] = []
+            if t.contains("dolby vision") || t.contains("dolbyvision") || t.contains("dovi") || t.contains(" dv ") {
+                tags.append("Dolby Vision")
+            } else if t.contains("hdr") {
+                tags.append("HDR")
+            }
+            if t.contains("remux") { tags.append("Remux") }
+            else if t.contains("bluray") || t.contains("blu-ray") { tags.append("BluRay") }
+            else if t.contains("web") { tags.append("WEB") }
+            if t.contains("atmos") { tags.append("Atmos") }
+            else if t.contains("truehd") { tags.append("TrueHD") }
+            else if t.contains("dts-hd") || t.contains("dts hd") { tags.append("DTS-HD") }
+            let label = tags.isEmpty ? "Standard" : tags.joined(separator: " · ")
+            let sc = score(s)
+            if let current = best[label], current.score >= sc { continue }
+            best[label] = (sc, s)
+        }
+        return best.map { (label: $0.key, stream: $0.value.stream) }
+            .sorted { score($0.stream) > score($1.stream) }
+            .prefix(8).map { $0 }
+    }
+
+    private static func tier(of s: CoreStream) -> String {
+        switch qualityLabel(s) {
+        case "4K": return "4K"
+        case "1080p": return "1080p"
+        case "720p": return "720p"
+        default: return "Others"
+        }
+    }
+
     /// A short resolution tag for the Watch-Now button ("4K" / "1080p" / …), or "Best" when unknown.
     static func qualityLabel(_ s: CoreStream) -> String {
         let t = qualityText(s)

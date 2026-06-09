@@ -89,6 +89,7 @@ struct CoreMeta: Decodable, Identifiable {
     let description: String?
     let releaseInfo: String?
     let imdbRating: String?
+    let genres: [String]?
 }
 
 // MARK: ctx (only what we need: addon manifests for catalog row titles)

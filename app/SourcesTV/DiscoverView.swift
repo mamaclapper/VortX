@@ -14,7 +14,7 @@ struct DiscoverView: View {
             ZStack {
                 // The focused title's artwork + details show through the band between the chips
                 // and the grid; the grid scrolls over them.
-                BrowseHeroBackdrop(model: focusModel, detailsTop: 300)
+                BrowseHeroBackdrop(model: focusModel, detailsTop: 320)
                 ScrollView {
                     VStack(alignment: .leading, spacing: Theme.Space.md) {
                         Text("Discover").screenTitleStyle().padding(.horizontal, Theme.Space.screenEdge)
@@ -22,7 +22,7 @@ struct DiscoverView: View {
                             typeChips(discover.selectable.types)
                             catalogChips(discover.selectable.catalogs)
                             genreChips(discover.selectable.extra)
-                            Color.clear.frame(height: 330)
+                            Color.clear.frame(height: 380)
                             grid(discover.items)
                         } else if account.isSignedIn {
                             ProgressView().controlSize(.large).tint(Theme.Palette.accent)

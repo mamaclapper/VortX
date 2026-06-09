@@ -7,14 +7,20 @@ struct HomeView: View {
     @EnvironmentObject private var theme: ThemeManager
     @EnvironmentObject private var account: StremioAccount
     @StateObject private var focusModel = FocusedItemModel()
+    @State private var presentedHero: FocusedHero?
 
     var body: some View {
         NavigationStack {
             ZStack {
                 // The living backdrop: whichever poster is focused fills the screen with its
-                // artwork and details. Rows scrolling up fade out UNDER the hero band (the mask)
-                // instead of driving over its text.
-                BrowseHeroBackdrop(model: focusModel)
+                // artwork and details. The details block is focusable: press to open the title,
+                // and it bridges upward focus from the rails to the tab bar.
+                // detailsBottom = strip height (470) + a breathing gap, so the synopsis can never
+                // run into the rail header regardless of tab-bar safe-area shifts.
+                BrowseHeroBackdrop(model: focusModel, detailsBottom: 494,
+                                   onSelect: { presentedHero = $0 })
+                // The rails live in a bottom strip. The focus engine centers focused rows inside
+                // THIS viewport, so they are geometrically incapable of riding up over the hero.
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: Theme.Space.xl) {
                         if !core.continueWatching.isEmpty {
@@ -30,12 +36,15 @@ struct HomeView: View {
                             if account.isSignedIn { LoadingRail() } else { CoreEmptyState.signedOut }
                         }
                     }
+                    .padding(.top, Theme.Space.sm)
                     .padding(.bottom, Theme.Space.xl)
                 }
-                // A margin, not content: the hero band shows through here, and scrolled-to-top
-                // detection still sees the resting position as "top" (so the tab bar can return).
-                .contentMargins(.top, 480, for: .scrollContent)
-                .mask(scrollMask)
+                .mask(stripMask)
+                .frame(height: 470)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            }
+            .navigationDestination(item: $presentedHero) { hero in
+                DetailView(type: hero.type, id: hero.id)
             }
             .overlay(alignment: .topLeading) {
                 header
@@ -45,26 +54,33 @@ struct HomeView: View {
             }
             .background(Theme.Palette.canvas.ignoresSafeArea())
         }
-        .onAppear { seed() }
+        .onAppear { configureMetaSources(); seed() }
         .onChange(of: core.boardRows.first?.id) { seed() }
         .onChange(of: core.continueWatching.first?.id) { seed() }
+        .onChange(of: core.addons.count) { configureMetaSources() }
     }
 
-    /// Clear over the hero band, a short fade, then fully visible: rows slide under the hero.
-    private var scrollMask: some View {
+    /// The hero enrichment asks the user's own meta add-ons, so every id scheme resolves.
+    private func configureMetaSources() {
+        FocusedItemModel.configureMetaSources(
+            transportUrls: core.addons.filter(\.providesMeta).map(\.transportUrl))
+    }
+
+    /// Rows leaving the strip fade out at its top edge instead of clipping hard.
+    private var stripMask: some View {
         VStack(spacing: 0) {
             LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
-                .frame(height: 110)
-                .padding(.top, 440)
+                .frame(height: 50)
             Color.black
         }
-        .ignoresSafeArea()
     }
 
-    /// First render shows the strongest hero available (board items carry art + synopsis).
+    /// First render shows the page's actual first item, and Continue Watching pre-fetches its
+    /// details so heroes are rich on first focus.
     private func seed() {
-        focusModel.seedIfEmpty(core.boardRows.first?.items.first?.focusedHero
-                               ?? core.continueWatching.first?.focusedHero)
+        focusModel.seedIfEmpty(core.continueWatching.first?.focusedHero
+                               ?? core.boardRows.first?.items.first?.focusedHero)
+        focusModel.warm(core.continueWatching.map(\.focusedHero))
     }
 
     /// Serif wordmark, the editorial signature: warm-white "Stremio" with an ember "X".

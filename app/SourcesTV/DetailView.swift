@@ -27,7 +27,18 @@ struct DetailView: View {
         }
         .background(Theme.Palette.canvas.ignoresSafeArea())
         .ignoresSafeArea(edges: .top)            // let the backdrop bleed to the top edge
-        .onAppear { core.loadMeta(type: type, id: id) }
+        .onAppear { core.loadMeta(type: type, id: id); captureHero() }
+        .onChange(of: core.metaDetails?.meta?.id) { captureHero() }
+    }
+
+    /// Feed the browse pages' hero cache with what this page knows. The engine resolved this meta
+    /// through the add-on system, so it works for every id scheme (tt, tmdb:, tvdb:, anything).
+    private func captureHero() {
+        guard let m = core.metaDetails?.meta, m.id == id else { return }
+        FocusedItemModel.noteMeta(id: m.id, type: type, title: m.name,
+                                  backdrop: m.background ?? m.poster,
+                                  releaseInfo: m.releaseInfo, imdbRating: m.imdbRating,
+                                  runtime: m.runtime, overview: m.description, genres: m.genres)
     }
 
     /// Series keep the hero + episode-list layout (the page below the hero is full of content).
@@ -356,14 +367,16 @@ struct FullBleedBackdrop: View {
             }
             .clipped()
             .overlay(
+                // Light hand: the artwork stays vivid across most of the screen; just enough
+                // canvas at the bottom for rows and at the leading edge for the text block.
                 LinearGradient(stops: [
                     .init(color: .clear, location: 0.0),
-                    .init(color: Theme.Palette.canvas.opacity(0.35), location: 0.42),
-                    .init(color: Theme.Palette.canvas.opacity(0.88), location: 0.72),
-                    .init(color: Theme.Palette.canvas, location: 1.0),
+                    .init(color: Theme.Palette.canvas.opacity(0.18), location: 0.50),
+                    .init(color: Theme.Palette.canvas.opacity(0.55), location: 0.78),
+                    .init(color: Theme.Palette.canvas.opacity(0.88), location: 1.0),
                 ], startPoint: .top, endPoint: .bottom))
             .overlay(
-                LinearGradient(colors: [Theme.Palette.canvas.opacity(0.75), .clear],
+                LinearGradient(colors: [Theme.Palette.canvas.opacity(0.6), .clear],
                                startPoint: .leading, endPoint: .center))
             .ignoresSafeArea()
     }
@@ -379,7 +392,8 @@ struct CoreStreamList: View {
     @EnvironmentObject private var theme: ThemeManager
     @State private var sourceFilter: String? = nil
     @State private var showAllSources = false   // the full ranked list is revealed on demand (Watch-Now first)
-    @State private var showQualityPicker = false   // the visible 4K/1080p/flavor dropdown
+    @State private var showQualityPicker = false   // level 1: pick a resolution tier
+    @State private var qualityTier: String? = nil  // level 2: pick a flavor inside that tier
     @EnvironmentObject private var presenter: PlayerPresenter   // root-replacement player presentation
 
     var body: some View {
@@ -401,15 +415,32 @@ struct CoreStreamList: View {
                     .buttonStyle(PrimaryActionStyle())
                     .contextMenu { resolutionMenu(groups) }
 
-                    // The visible quality dropdown: pick a resolution + flavor (Dolby Vision, Remux,
-                    // Atmos, …) and the best matching source plays.
+                    // The visible quality dropdown, two levels: resolution tier first (4K / 1080p /
+                    // 720p / Others), then the flavors inside it (Dolby Vision · Remux, HDR · Atmos, …).
                     Button { showQualityPicker = true } label: {
                         Label("Quality", systemImage: "chevron.up.chevron.down")
                     }
                     .buttonStyle(ChipButtonStyle())
                     .confirmationDialog("Pick a quality", isPresented: $showQualityPicker, titleVisibility: .visible) {
-                        ForEach(Array(StreamRanking.qualityOptions(groups).prefix(14)), id: \.label) { option in
-                            Button(option.label) { play(option.stream) }
+                        ForEach(StreamRanking.tiers(groups), id: \.self) { tier in
+                            Button(tier) {
+                                Task { @MainActor in
+                                    try? await Task.sleep(nanoseconds: 250_000_000)   // let level 1 dismiss first
+                                    qualityTier = tier
+                                }
+                            }
+                        }
+                    }
+                    .background {
+                        Color.clear.confirmationDialog(qualityTier ?? "",
+                                                       isPresented: Binding(get: { qualityTier != nil },
+                                                                            set: { if !$0 { qualityTier = nil } }),
+                                                       titleVisibility: .visible) {
+                            if let tier = qualityTier {
+                                ForEach(StreamRanking.variantOptions(groups, tier: tier), id: \.label) { option in
+                                    Button(option.label) { play(option.stream) }
+                                }
+                            }
                         }
                     }
 

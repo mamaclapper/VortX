@@ -70,13 +70,14 @@ enum PosterMenu { case none, continueWatching, catalog, library }
 // MARK: - Focused hero (the browse pages' living backdrop)
 
 /// What the browse pages show behind the rails for the title under focus.
-struct FocusedHero: Equatable {
+struct FocusedHero: Codable, Equatable, Hashable, Identifiable {
     let id: String
     let type: String
     let title: String
     let backdrop: String?     // background art, falling back to the poster
     let metaLine: String      // prebuilt "2026 · ★ 7.6 · Movie" style line
     let overview: String?
+    var genreLine: String?    // "Drama · Fantasy · Adventure" (optional so older caches decode)
 }
 
 /// The standard Stremio background art for an IMDB-identified title: real 16:9 backdrop art at
@@ -92,9 +93,11 @@ extension CoreMeta {
         if let releaseInfo, !releaseInfo.isEmpty { parts.append(releaseInfo) }
         if let imdbRating, !imdbRating.isEmpty { parts.append("★ \(imdbRating)") }
         parts.append(type.capitalized)
+        let genreLine = (genres?.isEmpty == false) ? genres!.prefix(3).joined(separator: " · ") : nil
         return FocusedHero(id: id, type: type, title: name,
                            backdrop: background ?? metahubBackground(for: id) ?? poster,
-                           metaLine: parts.joined(separator: "  ·  "), overview: description)
+                           metaLine: parts.joined(separator: "  ·  "), overview: description,
+                           genreLine: genreLine)
     }
 }
 
@@ -106,7 +109,7 @@ extension CoreCWItem {
         let line = pct > 0 ? "\(type.capitalized)  ·  \(pct)% watched" : type.capitalized
         return FocusedHero(id: id, type: type, title: name,
                            backdrop: metahubBackground(for: id) ?? poster,
-                           metaLine: line, overview: nil)
+                           metaLine: line, overview: nil, genreLine: nil)
     }
 }
 
@@ -128,7 +131,7 @@ extension CoreCWItem {
             return
         }
         pending?.cancel()
-        let resolved = Self.enrichmentCache[hero.id] ?? hero
+        let resolved = Self.resolve(hero)
         pending = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 150_000_000)
             guard !Task.isCancelled else { return }
@@ -141,47 +144,146 @@ extension CoreCWItem {
     /// First render: show something immediately instead of an empty canvas.
     func seedIfEmpty(_ hero: FocusedHero?) {
         guard self.hero == nil, let hero else { return }
-        self.hero = Self.enrichmentCache[hero.id] ?? hero
+        self.hero = Self.resolve(hero)
         detailsVisible = true
         enrichIfNeeded(self.hero ?? hero)
     }
 
-    /// Fill in synopsis / rating / year (and better art) for heroes that came from library data,
-    /// via Cinemeta's public meta endpoint. Cached for the session; applied only if still focused.
-    private func enrichIfNeeded(_ hero: FocusedHero) {
-        guard hero.overview == nil, hero.id.hasPrefix("tt"),
-              Self.enrichmentCache[hero.id] == nil,
-              let url = URL(string: "https://v3-cinemeta.strem.io/meta/\(hero.type)/\(hero.id).json") else { return }
+    /// The cached (detail-page-grade) hero when we have one, keeping the live progress tail
+    /// ("62% watched") from the incoming library hero.
+    private static func resolve(_ hero: FocusedHero) -> FocusedHero {
+        loadCacheIfNeeded()
+        guard let cached = enrichmentCache[hero.id] else { return hero }
+        let watchedTail = hero.metaLine.components(separatedBy: "  ·  ").first { $0.hasSuffix("% watched") }
+        let line = watchedTail.map { "\(cached.metaLine)  ·  \($0)" } ?? cached.metaLine
+        return FocusedHero(id: hero.id, type: hero.type, title: hero.title,
+                           backdrop: cached.backdrop ?? hero.backdrop,
+                           metaLine: line, overview: cached.overview ?? hero.overview,
+                           genreLine: cached.genreLine ?? hero.genreLine)
+    }
+
+    /// Capture what the detail page knows (the engine resolves EVERY id scheme, tmdb: included), so
+    /// any title you have opened shows its real backdrop, rating, and synopsis in the hero forever.
+    static func noteMeta(id: String, type: String, title: String, backdrop: String?,
+                         releaseInfo: String?, imdbRating: String?, runtime: String?,
+                         overview: String?, genres: [String]?) {
+        loadCacheIfNeeded()
+        var parts: [String] = []
+        if let releaseInfo, !releaseInfo.isEmpty { parts.append(releaseInfo) }
+        if let imdbRating, !imdbRating.isEmpty { parts.append("★ \(imdbRating)") }
+        if let runtime, !runtime.isEmpty { parts.append(runtime) }
+        parts.append(type.capitalized)
+        let genreLine = (genres?.isEmpty == false) ? genres!.prefix(3).joined(separator: " · ") : nil
+        let hero = FocusedHero(id: id, type: type, title: title, backdrop: backdrop,
+                               metaLine: parts.joined(separator: "  ·  "), overview: overview,
+                               genreLine: genreLine)
+        guard enrichmentCache[id] != hero else { return }
+        enrichmentCache[id] = hero
+        saveCache()
+    }
+
+    // MARK: persistence (survives relaunch, so heroes stay rich without re-opening titles)
+
+    private static var cacheLoaded = false
+    private static var cacheURL: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("hero-cache.json")
+    }
+
+    private static func loadCacheIfNeeded() {
+        guard !cacheLoaded else { return }
+        cacheLoaded = true
+        if let data = try? Data(contentsOf: cacheURL),
+           let decoded = try? JSONDecoder().decode([String: FocusedHero].self, from: data) {
+            enrichmentCache = decoded
+        }
+    }
+
+    private static func saveCache() {
+        if let data = try? JSONEncoder().encode(enrichmentCache) {
+            try? data.write(to: cacheURL, options: .atomic)
+        }
+    }
+
+    /// Base URLs of installed add-ons that serve metas. The enrichment walks these the way the
+    /// engine would, so every id scheme works (tt via Cinemeta, tmdb:/tvdb: via their add-ons).
+    private static var metaSourceBases: [String] = []
+
+    /// Call whenever the installed add-ons change. Accepts raw transport URLs (.../manifest.json).
+    static func configureMetaSources(transportUrls: [String]) {
+        metaSourceBases = transportUrls.map { url in
+            url.hasSuffix("manifest.json") ? String(url.dropLast("manifest.json".count)) : url
+        }
+    }
+
+    /// Pre-fetch details for rail items (Continue Watching especially) so the hero is already rich
+    /// the moment a card takes focus.
+    func warm(_ heroes: [FocusedHero]) {
+        Self.loadCacheIfNeeded()
+        for hero in heroes.prefix(15) { enrichIfNeeded(hero, apply: false) }
+    }
+
+    /// Fill in synopsis / rating / year / genres (and better art) for heroes that came from sparse
+    /// library data. Tries Cinemeta for IMDB ids, then every meta-serving add-on the user has
+    /// installed. Cached to disk; applied live only if the title is still focused.
+    private func enrichIfNeeded(_ hero: FocusedHero, apply: Bool = true) {
+        Self.loadCacheIfNeeded()
+        guard hero.overview == nil, Self.enrichmentCache[hero.id] == nil else { return }
+        let candidates = Self.metaURLs(for: hero)
+        guard !candidates.isEmpty else { return }
         Task { [weak self] in
-            var request = URLRequest(url: url)
-            request.timeoutInterval = 6
-            request.cachePolicy = .returnCacheDataElseLoad
-            guard let (data, _) = try? await URLSession.shared.data(for: request),
-                  let response = try? JSONDecoder().decode(CinemetaMetaResponse.self, from: data),
-                  let meta = response.meta else { return }
-            var parts: [String] = []
-            if let year = meta.releaseInfo, !year.isEmpty { parts.append(year) }
-            if let rating = meta.imdbRating, !rating.isEmpty { parts.append("★ \(rating)") }
-            parts.append(hero.metaLine)   // keep the type + progress tail
-            let enriched = FocusedHero(id: hero.id, type: hero.type, title: hero.title,
-                                       backdrop: meta.background ?? hero.backdrop,
-                                       metaLine: parts.joined(separator: "  ·  "),
-                                       overview: meta.description)
-            await MainActor.run {
-                Self.enrichmentCache[hero.id] = enriched
-                guard let self, self.hero?.id == hero.id else { return }
-                self.hero = enriched
+            for url in candidates {
+                var request = URLRequest(url: url)
+                request.timeoutInterval = 6
+                request.cachePolicy = .returnCacheDataElseLoad
+                guard let (data, response) = try? await URLSession.shared.data(for: request),
+                      (response as? HTTPURLResponse)?.statusCode == 200,
+                      let decoded = try? JSONDecoder().decode(AddonMetaResponse.self, from: data),
+                      let meta = decoded.meta,
+                      meta.description != nil || meta.background != nil else { continue }
+                var parts: [String] = []
+                if let year = meta.releaseInfo, !year.isEmpty { parts.append(year) }
+                if let rating = meta.imdbRating, !rating.isEmpty { parts.append("★ \(rating)") }
+                if let runtime = meta.runtime, !runtime.isEmpty { parts.append(runtime) }
+                // Keep the type, but drop any progress tail: it is stale by the next read, and
+                // resolve() re-attaches the live one.
+                let stableTail = hero.metaLine.components(separatedBy: "  ·  ")
+                    .filter { !$0.hasSuffix("% watched") }.joined(separator: "  ·  ")
+                if !stableTail.isEmpty { parts.append(stableTail) }
+                let genreLine = (meta.genres?.isEmpty == false)
+                    ? meta.genres!.prefix(3).joined(separator: " · ") : nil
+                let enriched = FocusedHero(id: hero.id, type: hero.type, title: hero.title,
+                                           backdrop: meta.background ?? hero.backdrop,
+                                           metaLine: parts.joined(separator: "  ·  "),
+                                           overview: meta.description, genreLine: genreLine)
+                await MainActor.run {
+                    Self.enrichmentCache[hero.id] = enriched
+                    Self.saveCache()
+                    guard apply, let self, self.hero?.id == hero.id else { return }
+                    self.hero = Self.resolve(hero)   // re-resolve so the live progress tail merges in
+                }
+                return
             }
         }
     }
+
+    private static func metaURLs(for hero: FocusedHero) -> [URL] {
+        var bases = metaSourceBases
+        if hero.id.hasPrefix("tt") { bases.insert("https://v3-cinemeta.strem.io/", at: 0) }
+        return bases.compactMap { URL(string: "\($0)meta/\(hero.type)/\(hero.id).json") }
+    }
 }
 
-private struct CinemetaMetaResponse: Decodable {
+/// The Stremio add-on protocol's meta response, the fields the hero uses. Same shape for
+/// Cinemeta and every catalog add-on.
+private struct AddonMetaResponse: Decodable {
     struct Meta: Decodable {
         let description: String?
         let imdbRating: String?
         let releaseInfo: String?
         let background: String?
+        let runtime: String?
+        let genres: [String]?
     }
     let meta: Meta?
 }
@@ -201,7 +303,14 @@ private struct FocusReporter: View {
 /// block (title, meta line, synopsis) on the upper-left band. Content scrolls over it.
 struct BrowseHeroBackdrop: View {
     @ObservedObject var model: FocusedItemModel
-    var detailsTop: CGFloat = 150   // Home: just under the tab bar; grid pages: below their chips
+    var detailsTop: CGFloat = 90   // Home: just under the tab bar; grid pages: below their chips
+    /// When set, the block's BOTTOM is pinned this far above the container's bottom edge instead of
+    /// using `detailsTop`. The rails strip anchors to the same edge, so the two can never collide
+    /// even as the tab bar shows or hides and shifts the top safe area.
+    var detailsBottom: CGFloat? = nil
+    /// When set, the details block is focusable: press to open the title, and it bridges upward
+    /// focus from the rails to the tab bar.
+    var onSelect: ((FocusedHero) -> Void)? = nil
     @EnvironmentObject private var theme: ThemeManager
 
     var body: some View {
@@ -212,7 +321,41 @@ struct BrowseHeroBackdrop: View {
                     .id(hero.id)
                     .transition(.opacity)
                 if model.detailsVisible {
-                    VStack(alignment: .leading, spacing: Theme.Space.sm) {
+                    positioned(detailsBlock(hero)
+                        .frame(maxWidth: 860, alignment: .leading)
+                        .padding(.leading, Theme.Space.screenEdge))
+                        .id("details-\(hero.id)")
+                        .transition(.opacity)
+                }
+            }
+        }
+        .animation(.easeOut(duration: 0.35), value: model.hero?.id)
+        .animation(.easeOut(duration: 0.25), value: model.detailsVisible)
+        // No ignoresSafeArea here: the image layer handles its own full-bleed, and keeping this
+        // container inside the safe area lets the tab bar reclaim focus when you press up at the top.
+    }
+
+    @ViewBuilder private func positioned<Content: View>(_ content: Content) -> some View {
+        if let detailsBottom {
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                .padding(.bottom, detailsBottom)
+        } else {
+            content.padding(.top, detailsTop)
+        }
+    }
+
+    @ViewBuilder private func detailsBlock(_ hero: FocusedHero) -> some View {
+        if let onSelect {
+            Button { onSelect(hero) } label: { detailsText(hero) }
+                .buttonStyle(HeroDetailsStyle())
+        } else {
+            detailsText(hero)
+        }
+    }
+
+    private func detailsText(_ hero: FocusedHero) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
                         Text(hero.title)
                             .font(Theme.Typography.screenTitle)
                             .foregroundStyle(Theme.Palette.textPrimary)
@@ -221,25 +364,39 @@ struct BrowseHeroBackdrop: View {
                         Text(hero.metaLine)
                             .font(Theme.Typography.label)
                             .foregroundStyle(Theme.Palette.textSecondary)
+                        if let genres = hero.genreLine {
+                            Text(genres)
+                                .font(Theme.Typography.label)
+                                .foregroundStyle(Theme.Palette.textTertiary)
+                        }
                         if let overview = hero.overview, !overview.isEmpty {
                             Text(overview)
                                 .font(Theme.Typography.body)
                                 .foregroundStyle(Theme.Palette.textSecondary)
                                 .lineLimit(3).lineSpacing(2)
+                                .padding(.top, 2)
                         }
-                    }
-                    .frame(maxWidth: 860, alignment: .leading)
-                    .padding(.leading, Theme.Space.screenEdge)
-                    .padding(.top, detailsTop)
-                    .id("details-\(hero.id)")
-                    .transition(.opacity)
-                }
-            }
         }
-        .animation(.easeOut(duration: 0.35), value: model.hero?.id)
-        .animation(.easeOut(duration: 0.25), value: model.detailsVisible)
-        // No ignoresSafeArea here: the image layer handles its own full-bleed, and keeping this
-        // container inside the safe area lets the tab bar reclaim focus when you press up at the top.
+    }
+}
+
+/// Focus treatment for the hero details button: a gentle lift and brighter title, no chrome, so
+/// it reads as the hero itself being focusable rather than a boxed control.
+private struct HeroDetailsStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HeroDetailsContent(configuration: configuration)
+    }
+
+    private struct HeroDetailsContent: View {
+        let configuration: ButtonStyle.Configuration
+        @Environment(\.isFocused) private var isFocused
+        @EnvironmentObject private var theme: ThemeManager
+
+        var body: some View {
+            configuration.label
+                .scaleEffect(isFocused ? 1.03 : 1.0, anchor: .topLeading)
+                .animation(.spring(response: 0.32, dampingFraction: 0.78), value: isFocused)
+        }
     }
 }
 
