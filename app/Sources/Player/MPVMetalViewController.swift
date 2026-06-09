@@ -341,6 +341,18 @@ final class MPVMetalViewController: UIViewController {
         return result
     }
 
+    /// Named chapters from mpv's `chapter-list` (title + start time). Empty for files without chapters.
+    /// Read via the same scalar getters as `tracks(ofType:)`, no `MPV_FORMAT_NODE` parsing needed.
+    func chapters() -> [MPVChapter] {
+        guard mpv != nil else { return [] }
+        let count = getInt("chapter-list/count")
+        guard count > 0 else { return [] }
+        return (0..<count).map { i in
+            MPVChapter(title: getString("chapter-list/\(i)/title") ?? "",
+                       start: getDouble("chapter-list/\(i)/time"))
+        }
+    }
+
     func setAudioTrack(_ id: Int) { setString(MPVProperty.aid, id < 0 ? "no" : String(id)) }
     func setSubtitleTrack(_ id: Int) { setString(MPVProperty.sid, id < 0 ? "no" : String(id)) }
 

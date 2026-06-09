@@ -49,6 +49,7 @@ struct TVPlayerView: View {
     @State private var autoRetryTask: Task<Void, Never>?
     private let maxAutoRetries = 2                     // transient source hiccups recover; a dead link still falls through fast
     private let autoRetryBackoff = 1.2                 // seconds between auto-retries
+    @State private var skipSegments: [SkipSegment] = []   // intro/outro spans derived from the file's chapters
     // Current episode (changes when switching via Next/Prev/Episodes or auto-advance). Seeded from
     // the passed url/title/meta in onAppear so the first load is unchanged.
     @State private var curURL: URL?
@@ -107,7 +108,7 @@ struct TVPlayerView: View {
                     case MPVProperty.videoParamsSigPeak:
                         if let p = data as? Double { isHDR = p > 1.0 }
                     case MPVProperty.duration:
-                        if let d = data as? Double { duration = d; maybeResume() }
+                        if let d = data as? Double { duration = d; maybeResume(); refreshSkipSegments() }
                     case MPVProperty.trackList:
                         refreshTracks()
                         let s = coordinator.player?.mediaSummary()
@@ -144,6 +145,7 @@ struct TVPlayerView: View {
             if showInfo && !showOptions && !loadFailed { controlBar }
             if showOptions { optionsPanel }
             if loadFailed { loadErrorOverlay }
+            if controlsHidden, let seg = currentSkip { skipPill(seg) }
         }
         .onAppear {
             if curURL == nil { curURL = url; curTitle = title; curMeta = meta }   // seed from initial
@@ -197,7 +199,9 @@ struct TVPlayerView: View {
             switch type {
             case .menu: saveProgress(at: currentTime); onClose()
             case .playPause: toggle()
-            default: showControls()                       // any swipe / select reveals the bar
+            case .select:
+                if let seg = currentSkip { skipTo(seg) } else { showControls() }   // pill up → skip, else reveal
+            default: showControls()                       // any swipe reveals the bar
             }
             return
         }
@@ -731,6 +735,46 @@ struct TVPlayerView: View {
         buffering = true; hasStartedPlaying = false; appliedResume = false; appliedAutoTracks = false; loadErrorMsg = ""
         coordinator.player?.loadFile(curURL ?? url)
         startLoadTimeout()
+    }
+
+    // MARK: - Skip intro / outro (chapter-derived; AniSkip crowd-sourced timings can feed the same model later)
+
+    /// The skip segment the playhead is currently inside, if any. Gated on `hasStartedPlaying` so a stale
+    /// segment from the previous file never flashes during a load.
+    private var currentSkip: SkipSegment? {
+        guard hasStartedPlaying else { return nil }
+        return skipSegments.first { currentTime >= $0.start && currentTime < $0.end }
+    }
+
+    /// Recompute intro/outro spans from the current file's named chapters, once its duration is known.
+    private func refreshSkipSegments() {
+        skipSegments = SkipSegments.detect(chapters: coordinator.player?.chapters() ?? [], duration: duration)
+    }
+
+    /// Jump past a skip segment to its end, updating the playhead so the pill clears immediately.
+    private func skipTo(_ segment: SkipSegment) {
+        coordinator.player?.seek(to: segment.end)
+        currentTime = segment.end
+    }
+
+    /// The "Skip Intro / Skip Outro" pill, bottom-trailing. Shown only while watching (controls hidden);
+    /// pressing Select skips it (see `handlePress`).
+    private func skipPill(_ segment: SkipSegment) -> some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                HStack(spacing: Theme.Space.sm) {
+                    Image(systemName: "forward.fill")
+                    Text(segment.label).fontWeight(.semibold)
+                }
+                .padding(.horizontal, Theme.Space.xl).padding(.vertical, Theme.Space.md)
+                .foregroundStyle(Theme.Palette.canvas)
+                .background(Capsule().fill(Theme.Palette.accent))
+                .padding(Theme.Space.screenEdge * 1.5)
+            }
+        }
+        .transition(.opacity)
     }
 
     // MARK: - Episode navigation (series only; `episodes` is the season's ordered list)
