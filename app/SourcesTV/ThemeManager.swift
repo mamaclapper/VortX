@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 private func themeRGB(_ r: Double, _ g: Double, _ b: Double) -> Color {
     Color(.sRGB, red: r, green: g, blue: b, opacity: 1)
@@ -47,10 +48,22 @@ final class ThemeManager: ObservableObject {
     var accent: Color { option.base }
     var accentBright: Color { option.bright }
 
-    // Chrome: warm near-black by default, true black for OLED / AMOLED panels.
-    var canvas: Color   { oled ? themeRGB(0, 0, 0)             : themeRGB(0.082, 0.071, 0.055) }
-    var surface1: Color { oled ? themeRGB(0.055, 0.055, 0.057) : themeRGB(0.129, 0.110, 0.086) }
-    var surface2: Color { oled ? themeRGB(0.094, 0.094, 0.098) : themeRGB(0.176, 0.149, 0.114) }
-    var surface3: Color { oled ? themeRGB(0.141, 0.141, 0.149) : themeRGB(0.227, 0.192, 0.153) }
-    var hairline: Color { oled ? themeRGB(0.196, 0.196, 0.204) : themeRGB(0.251, 0.212, 0.161) }
+    // Chrome: a dark near-black tinted toward the accent's hue (so "Warm" now follows the accent —
+    // Ocean reads cool, Forest green, Mono near-neutral), or true black for OLED / AMOLED panels.
+    var canvas: Color   { oled ? themeRGB(0, 0, 0)             : tintedDark(0.085) }
+    var surface1: Color { oled ? themeRGB(0.055, 0.055, 0.057) : tintedDark(0.130) }
+    var surface2: Color { oled ? themeRGB(0.094, 0.094, 0.098) : tintedDark(0.175) }
+    var surface3: Color { oled ? themeRGB(0.141, 0.141, 0.149) : tintedDark(0.225) }
+    var hairline: Color { oled ? themeRGB(0.196, 0.196, 0.204) : tintedDark(0.260) }
+
+    /// A dark surface at `brightness`, hued toward the current accent. Subtle (like the original warm
+    /// near-black) but it now shifts with the chosen accent. Saturation is half the accent's, capped, so
+    /// vivid accents tint gently and Mono stays near-neutral.
+    private func tintedDark(_ brightness: Double) -> Color {
+        var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard UIColor(accent).getHue(&h, saturation: &s, brightness: &b, alpha: &a) else {
+            return themeRGB(brightness, brightness, brightness)
+        }
+        return Color(hue: Double(h), saturation: min(Double(s) * 0.5, 0.34), brightness: brightness)
+    }
 }

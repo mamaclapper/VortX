@@ -231,6 +231,7 @@ struct TVPlayerView: View {
         if !audioTracks.isEmpty { c.append(.audio) }
         c.append(.subs)
         c.append(.aspect)
+        if hasAlternateSources { c.append(.sources) }   // was drawn but missing here → unreachable by remote
         if episodes.count > 1 { c.append(.episodes) }
         return c
     }

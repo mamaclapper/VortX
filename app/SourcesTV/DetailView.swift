@@ -172,7 +172,7 @@ struct CoreSeasonedEpisodes: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         if isWatched {
-                            Image(systemName: "checkmark.circle.fill").font(.callout).foregroundStyle(Theme.Palette.textSecondary)
+                            Image(systemName: "checkmark.circle.fill").font(.callout).foregroundStyle(Theme.Palette.accent)
                         }
                         Text("\(v.episode ?? 0). \(episodeTitle(v))")
                             .font(Theme.Typography.cardTitle)
@@ -212,7 +212,7 @@ struct CoreSeasonedEpisodes: View {
         .overlay(alignment: .topTrailing) {
             if isWatched {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.title2).foregroundStyle(Theme.Palette.textPrimary).padding(8).shadow(radius: 3)
+                    .font(.title2).foregroundStyle(Theme.Palette.accent).padding(8).shadow(radius: 3)
             }
         }
         .opacity(isWatched ? 0.55 : 1)
@@ -255,71 +255,75 @@ struct CoreStreamList: View {
     var episodes: [CoreVideo] = []               // the season's episodes (series only), for the player's Prev/Next/Episodes
     @EnvironmentObject private var core: CoreBridge
     @State private var sourceFilter: String? = nil
+    @State private var showAllSources = false   // the full ranked list is revealed on demand (Watch-Now first)
     @EnvironmentObject private var presenter: PlayerPresenter   // root-replacement player presentation
 
     var body: some View {
-        let groups = core.streamGroups()
+        let groups = StreamRanking.rankedGroups(core.streamGroups())   // best source first within each add-on
         let streamCount = groups.reduce(0) { $0 + $1.streams.count }
         let visible = groups.filter { sourceFilter == nil || $0.addon == sourceFilter }
         let addons = core.streamLoadProgress()                       // (loaded, total) stream add-ons
         let loadingAddons = addons.total == 0 || addons.loaded < addons.total
+        let best = StreamRanking.best(groups)
 
         return VStack(alignment: .leading, spacing: Theme.Space.md) {
-            // Header: live add-on progress while streams arrive, settled source count once done.
-            if loadingAddons && addons.total > 0 {
-                HStack(spacing: Theme.Space.sm) {
-                    ProgressView().tint(Theme.Palette.accent)
-                    Text("Loaded \(addons.loaded)/\(addons.total) add-ons")
-                        .font(Theme.Typography.body).foregroundStyle(Theme.Palette.textSecondary)
-                    if streamCount > 0 {
-                        Text("·  \(streamCount) source\(streamCount == 1 ? "" : "s") so far")
-                            .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textTertiary)
+            if let best {
+                // Watch-Now first: one press plays the best source; long-press picks another resolution;
+                // the full ranked list stays tucked behind "All sources".
+                HStack(spacing: Theme.Space.md) {
+                    Button { play(best) } label: {
+                        Label("Watch in \(StreamRanking.qualityLabel(best))", systemImage: "play.fill")
                     }
-                }
-                .padding(.vertical, Theme.Space.xs)
-            } else if streamCount > 0 {
-                Text("\(visible.reduce(0) { $0 + $1.streams.count }) of \(streamCount) source\(streamCount == 1 ? "" : "s")")
-                    .eyebrowStyle()
-            }
+                    .buttonStyle(PrimaryActionStyle())
+                    .contextMenu { resolutionMenu(groups) }
 
-            if streamCount > 0 {
-                if groups.count > 1 { filterBar(groups, total: streamCount) }
-                // LazyVStack so only the on-screen rows are built: a popular title can return 2000+
-                // streams, and a plain VStack instantiated them all at once, which OOM-crashes the Apple
-                // TV mid-load. Enumerated ids avoid a duplicate-id ForEach crash if two sources collide.
-                LazyVStack(spacing: Theme.Space.sm) {
-                    ForEach(visible) { group in
-                        ForEach(Array(group.streams.enumerated()), id: \.offset) { _, stream in
-                            streamRow(group.addon, stream)
+                    Button { withAnimation { showAllSources.toggle() } } label: {
+                        Label(showAllSources ? "Hide sources" : "All sources · \(streamCount)",
+                              systemImage: showAllSources ? "chevron.up" : "list.bullet")
+                    }
+                    .buttonStyle(ChipButtonStyle(selected: showAllSources))
+                }
+                if loadingAddons && addons.total > 0 {
+                    Text("Still finding more · \(addons.loaded)/\(addons.total) add-ons")
+                        .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textTertiary)
+                }
+                if showAllSources {
+                    if groups.count > 1 { filterBar(groups, total: streamCount) }
+                    // LazyVStack so only on-screen rows are built: a popular title can return 2000+ sources,
+                    // and a plain VStack instantiated them all at once, OOM-crashing the Apple TV mid-load.
+                    LazyVStack(spacing: Theme.Space.sm) {
+                        ForEach(visible) { group in
+                            ForEach(Array(group.streams.enumerated()), id: \.offset) { _, stream in
+                                streamRow(group.addon, stream)
+                            }
                         }
                     }
                 }
             } else if loadingAddons {
-                // Focusable so focus stays in this pushed view instead of escaping to the tab bar while
-                // streams load: the tvOS focus engine needs a target, and with none it jumps to the top
-                // nav. (Same anchor pattern DetailView uses for its meta spinner.)
-                HStack(spacing: Theme.Space.sm) {
-                    ProgressView().tint(Theme.Palette.accent)
-                    Text(addons.total > 0 ? "Finding streams…  (\(addons.loaded)/\(addons.total) add-ons)" : "Finding streams…")
-                        .font(Theme.Typography.body).foregroundStyle(Theme.Palette.textSecondary)
+                // Searching: a focusable, primary-styled loading button (focus can't escape to the tab bar
+                // while sources arrive). It flips to "Watch in …" the moment the first source lands.
+                Button {} label: {
+                    HStack(spacing: Theme.Space.sm) {
+                        ProgressView().tint(Theme.Palette.onAccent)
+                        Text(addons.total > 0 ? "Finding sources…  \(addons.loaded)/\(addons.total)" : "Finding sources…")
+                    }
                 }
-                .padding(.vertical, Theme.Space.md)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .focusable()
+                .buttonStyle(PrimaryActionStyle())
             } else {
-                // Every add-on finished with nothing playable. Focusable so Back still pops the view.
-                VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    Text("No sources found")
-                        .font(Theme.Typography.sectionTitle).foregroundStyle(Theme.Palette.textPrimary)
-                    Text("None of your \(addons.total) add-on\(addons.total == 1 ? "" : "s") returned a playable source for this title.")
-                        .font(Theme.Typography.body).foregroundStyle(Theme.Palette.textSecondary)
-                }
-                .padding(.vertical, Theme.Space.md)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .focusable()
+                // Done, nothing playable: a greyed (disabled-looking) button + an explanation. Focusable so Back works.
+                Button {} label: { Label("No sources found", systemImage: "exclamationmark.triangle") }
+                    .buttonStyle(PrimaryActionStyle())
+                    .opacity(0.55)
+                Text("None of your \(addons.total) add-on\(addons.total == 1 ? "" : "s") returned a playable source for this title.")
+                    .font(Theme.Typography.body).foregroundStyle(Theme.Palette.textSecondary)
             }
+        }
+    }
+
+    /// Resolution dropdown for the Watch button (long-press): the best source at each available quality.
+    @ViewBuilder private func resolutionMenu(_ groups: [CoreStreamSourceGroup]) -> some View {
+        ForEach(StreamRanking.resolutionOptions(groups), id: \.label) { opt in
+            Button { play(opt.stream) } label: { Label("Watch in \(opt.label)", systemImage: "play.fill") }
         }
     }
 
