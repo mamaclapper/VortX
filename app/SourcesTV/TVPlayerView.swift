@@ -31,6 +31,7 @@ struct TVPlayerView: View {
     @State private var hideTask: Task<Void, Never>?
     @State private var audioTracks: [MPVTrack] = []
     @State private var subtitleTracks: [MPVTrack] = []
+    @State private var appliedAutoTracks = false       // auto-select audio/subtitle once per load
     @State private var showOptions = false             // options panel (audio / subtitles / aspect / episodes)
     @State private var panelKind: PanelKind = .audio   // which list the options panel shows
     @State private var subDelay: Double = 0            // manual subtitle sync, seconds
@@ -105,6 +106,10 @@ struct TVPlayerView: View {
                         refreshTracks()
                         let s = coordinator.player?.mediaSummary()
                         videoHeight = s?.height ?? 0; audioCodec = s?.audioCodec ?? ""
+                        if !appliedAutoTracks, !(audioTracks.isEmpty && subtitleTracks.isEmpty) {
+                            appliedAutoTracks = true
+                            autoSelectTracks()
+                        }
                     case MPVProperty.endFileError:
                         loadTimeout?.cancel()
                         if !hasStartedPlaying { loadErrorMsg = (data as? String) ?? ""; withAnimation { loadFailed = true } }
@@ -583,6 +588,14 @@ struct TVPlayerView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { refreshTracks() }
     }
 
+    /// Auto-pick the audio + subtitle track from the user's language preferences, once tracks are known.
+    private func autoSelectTracks() {
+        let pick = TrackSelector.select(audio: audioTracks, subtitles: subtitleTracks, preferences: TrackPreferences.current)
+        if let a = pick.audio { coordinator.player?.setAudioTrack(a) }
+        if let s = pick.subtitle { coordinator.player?.setSubtitleTrack(s) }   // -1 = off
+        refreshTracksSoon()
+    }
+
     // MARK: - Load failure
 
     private var loadErrorOverlay: some View {
@@ -617,7 +630,7 @@ struct TVPlayerView: View {
 
     private func retryLoad() {
         withAnimation { loadFailed = false }
-        buffering = true; hasStartedPlaying = false; appliedResume = false; loadErrorMsg = ""
+        buffering = true; hasStartedPlaying = false; appliedResume = false; appliedAutoTracks = false; loadErrorMsg = ""
         coordinator.player?.loadFile(curURL ?? url)
         startLoadTimeout()
     }
@@ -643,7 +656,7 @@ struct TVPlayerView: View {
         saveProgress(at: currentTime)
         withAnimation { showOptions = false }
         buffering = true; hasStartedPlaying = false; appliedResume = false
-        loadFailed = false; currentTime = 0; duration = 0; lastSaved = -1; resumeSeconds = nil
+        loadFailed = false; currentTime = 0; duration = 0; lastSaved = -1; resumeSeconds = nil; appliedAutoTracks = false
         let newMeta = PlaybackMeta(libraryId: m.libraryId, videoId: v.id, type: "series",
                                    name: m.name, poster: m.poster, season: v.season, episode: v.episode)
         curMeta = newMeta
