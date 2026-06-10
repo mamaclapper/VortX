@@ -7,6 +7,7 @@ struct SearchView: View {
     @EnvironmentObject private var account: StremioAccount
     @State private var query = ""
     @State private var searchTask: Task<Void, Never>?
+    @State private var searchDebouncePending = false
 
     var body: some View {
         Group {
@@ -41,12 +42,8 @@ struct SearchView: View {
     }
 
     @ViewBuilder private var resultGrid: some View {
-        if core.searchResults.isEmpty {
-            Text(emptyText)
-                .font(Theme.Typography.body)
-                .foregroundStyle(Theme.Palette.textTertiary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, Theme.Space.xl)
+        if !hasSearchQuery || core.searchResults.isEmpty {
+            emptyState
         } else {
             VStack(alignment: .leading, spacing: Theme.Space.xl) {
                 ForEach(resultSections, id: \.title) { section in
@@ -54,6 +51,20 @@ struct SearchView: View {
                 }
             }
         }
+    }
+
+    private var emptyState: some View {
+        HStack(spacing: Theme.Space.sm) {
+            if isWaitingForCurrentQuery {
+                ProgressView()
+                    .tint(Theme.Palette.accent)
+            }
+            Text(emptyText)
+        }
+        .font(Theme.Typography.body)
+        .foregroundStyle(Theme.Palette.textTertiary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, Theme.Space.xl)
     }
 
     private func resultRow(title: String, items: [CoreMeta]) -> some View {
@@ -83,9 +94,18 @@ struct SearchView: View {
     }
 
     private var emptyText: String {
-        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if isWaitingForCurrentQuery { return "Searching..." }
+        return query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "Start typing to search across everything your add-ons cover."
             : "No matches for \"\(query)\"."
+    }
+
+    private var isWaitingForCurrentQuery: Bool {
+        hasSearchQuery && (searchDebouncePending || core.searchIsLoading)
+    }
+
+    private var hasSearchQuery: Bool {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2
     }
 
     private var suggestionTitles: [String] {
@@ -115,11 +135,13 @@ struct SearchView: View {
 
     private func scheduleSearch(_ value: String) {
         searchTask?.cancel()
+        searchDebouncePending = value.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2
         searchTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled else { return }
             core.suggestSearch(value)
             searchNow(value)
+            searchDebouncePending = false
         }
     }
 

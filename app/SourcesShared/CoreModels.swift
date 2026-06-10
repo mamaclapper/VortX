@@ -75,6 +75,7 @@ enum CoreLoadable<T: Decodable>: Decodable {
     }
 
     var ready: T? { if case let .ready(value) = self { return value } else { return nil } }
+    var isLoading: Bool { if case .loading = self { return true } else { return false } }
 }
 
 struct CoreMeta: Decodable, Identifiable {
