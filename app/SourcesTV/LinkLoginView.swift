@@ -117,7 +117,11 @@ struct LinkLoginView: View {
                         }
                         return
                     }
-                    if let token = try await LinkAuthService.read(code: created.code) {
+                    // A transient network blip mid-poll must not kill the flow: only code
+                    // creation failures surface as errors. The loop keeps polling until the
+                    // key arrives, the code expires, or the view goes away.
+                    let token = (try? await LinkAuthService.read(code: created.code)) ?? nil
+                    if let token, !token.isEmpty {
                         await MainActor.run {
                             status = "Signing in…"
                             errorMessage = nil
