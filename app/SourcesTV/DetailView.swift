@@ -253,7 +253,10 @@ struct CoreSeasonedEpisodes: View {
         VStack(alignment: .leading, spacing: Theme.Space.md) {
             RailHeader(eyebrow: "\(episodes.count) episode\(episodes.count == 1 ? "" : "s")", title: "Episodes")
 
-            if seasons.count > 1 {
+            // Always render the season chips, even for a single season: they are the
+            // only home of the bulk watched menu (long press), so hiding them left
+            // single-season shows with no season or series level mark-watched at all.
+            if !seasons.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: Theme.Space.sm) {
                         ForEach(seasons, id: \.self) { s in
