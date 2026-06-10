@@ -94,11 +94,15 @@ struct RootTabView: View {
         .onChange(of: theme.oled) { applyTabBarAccent(); ProfileStore.shared.captureTheme() }
     }
 
-    /// The focused tab's pill is system white by default; recolor it to the active accent (with the
-    /// dark on-accent ink for the focused label) via UITabBarAppearance, and push the appearance onto
-    /// any live tab bars so an accent change repaints without a relaunch.
+    /// The focused / selected tab pill is system white by default; recolor it to the active accent
+    /// with dark on-accent ink, and push the appearance onto any live tab bars so an accent change
+    /// repaints without a relaunch.
     private func applyTabBarAccent() {
         let item = UITabBarItemAppearance()
+        item.normal.titleTextAttributes = [.foregroundColor: UIColor(Theme.Palette.textSecondary)]
+        item.normal.iconColor = UIColor(Theme.Palette.textSecondary)
+        item.selected.titleTextAttributes = [.foregroundColor: UIColor(Theme.Palette.onAccent)]
+        item.selected.iconColor = UIColor(Theme.Palette.onAccent)
         item.focused.titleTextAttributes = [.foregroundColor: UIColor(Theme.Palette.onAccent)]
         item.focused.iconColor = UIColor(Theme.Palette.onAccent)
         let appearance = UITabBarAppearance()
@@ -108,6 +112,7 @@ struct RootTabView: View {
         appearance.stackedLayoutAppearance = item
         appearance.compactInlineLayoutAppearance = item
         UITabBar.appearance().standardAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = appearance
         for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
             for window in scene.windows { retintTabBars(under: window.rootViewController, with: appearance) }
         }
@@ -117,6 +122,7 @@ struct RootTabView: View {
         guard let controller else { return }
         if let tabs = controller as? UITabBarController {
             tabs.tabBar.standardAppearance = appearance
+            tabs.tabBar.scrollEdgeAppearance = appearance
             tabs.tabBar.setNeedsLayout()
         }
         controller.children.forEach { retintTabBars(under: $0, with: appearance) }
