@@ -74,6 +74,7 @@ Everything the Apple TV app does today:
 - Profiles and their history are per-device for now. Stremio's API offers no safe place for third-party data (the one approach that technically worked corrupted library sync for official apps, so it was removed and is automatically repaired). Cross-device profile sync returns once StremioX has its own sync channel, planned on the roadmap.
 - An optional 4-digit PIN gates any profile.
 - A profile can share the main Stremio account or sign into its own; switching keeps every session valid.
+- Sign in by scanning a QR code with your phone and logging in on Stremio's own page, so you never type a password with the remote; password sign-in stays as a fallback. Contributed by [OrigamiSpace](https://github.com/OrigamiSpace).
 
 **Sources**
 
@@ -86,7 +87,8 @@ Everything the Apple TV app does today:
 **Playback**
 
 - The codecs actually work: TrueHD and Atmos, DTS-HD MA, EAC3, 4K, HDR, and Dolby Vision all play through libmpv, instead of silence or a black screen.
-- A deep read-ahead buffer that lives on the Apple TV's flash storage instead of RAM (2 GB of forward cache), so even huge 4K remuxes ride out network dips without stalling and without squeezing the rest of the app.
+- Real HDR and Dolby Vision output: starting HDR content switches the Apple TV's HDMI link into the content's mode at its native frame rate, your TV lights its HDR or Dolby Vision badge, and the display returns to normal when playback ends. Requires Match Dynamic Range under Settings > Video and Audio > Match Content on the Apple TV.
+- A half-gigabyte read-ahead buffer sized to what the Apple TV can actually hold, so 4K remuxes ride out network dips without stalling. (A deeper disk-backed cache was tried and reverted: it crashed real devices at a constant twenty-one seconds.)
 - Skip intro, recap, and credits: crowd-sourced timestamps (looked up by IMDB, TMDB, or TVDB id, so every catalog add-on works) merged with the file's own chapter markers, with sanity guards so a bad entry can never skip you into the middle of an episode. Cached on device.
 - Auto-play next episode, properly: the next episode is fetched and ranked in the background at the halfway mark, so when the credits end the best source is already chosen and starts instantly.
 - Smart track selection: audio and subtitles picked from your preferred languages automatically, with forced-subtitle handling.
@@ -217,6 +219,7 @@ This is an independent community project. It is not affiliated with or endorsed 
 - [mpv](https://mpv.io/) and [MPVKit](https://github.com/mpvkit/MPVKit), for the player.
 - [nodejs-mobile](https://github.com/nodejs-mobile/nodejs-mobile), for the embedded server runtime.
 - Claude (Anthropic) wrote the code.
+- [OrigamiSpace](https://github.com/OrigamiSpace), the first community contributor: the QR sign-in, the tab bar and focus fixes on real hardware, and the build-from-source report that made a fresh clone work for everyone.
 
 See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for the full list.
 
