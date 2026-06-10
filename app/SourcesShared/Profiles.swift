@@ -80,6 +80,7 @@ final class ProfileStore: ObservableObject {
             profiles[0].isOwner = true
             persist(touch: false)
         }
+        normalizeOwner()
         if activeID == nil || !profiles.contains(where: { $0.id == activeID }) {
             activeID = profiles.first?.id
         }
@@ -103,8 +104,12 @@ final class ProfileStore: ObservableObject {
     }
 
     func keychainAccount(for profile: UserProfile) -> String {
-        profile.usesOwnAccount ? Self.primaryTokenAccount + "." + profile.id.uuidString
-                               : Self.primaryTokenAccount
+        // The owner IS the primary account: it always reads the primary slot, no matter what the
+        // usesOwnAccount flag says. (A synced roster once arrived with the flag flipped on the
+        // owner, which pointed sign-in at an empty per-profile slot and "signed out" every device.)
+        if profile.isOwner { return Self.primaryTokenAccount }
+        return profile.usesOwnAccount ? Self.primaryTokenAccount + "." + profile.id.uuidString
+                                      : Self.primaryTokenAccount
     }
 
     /// What the account layer must do after a switch. `.switchAccount` carries the new profile's
@@ -230,6 +235,7 @@ final class ProfileStore: ObservableObject {
 
     private func adoptRemoteRoster(_ remote: [UserProfile]) {
         profiles = remote
+        normalizeOwner()
         if !profiles.contains(where: { $0.id == activeID }) { activeID = profiles.first?.id }
         if let active {
             ThemeManager.shared.accentID = active.accentID
@@ -237,6 +243,14 @@ final class ProfileStore: ObservableObject {
         }
         persist(touch: false)
         loadWatchCache()
+    }
+
+    /// The owner profile can never be an own-account profile; scrub the flag wherever a roster
+    /// comes from (old build, remote sync) so no device ends up reading an empty token slot.
+    private func normalizeOwner() {
+        for index in profiles.indices where profiles[index].isOwner {
+            profiles[index].usesOwnAccount = false
+        }
     }
 
     private func schedulePushRoster() {

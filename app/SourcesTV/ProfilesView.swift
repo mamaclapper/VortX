@@ -225,23 +225,29 @@ struct ProfileEditorView: View {
                             .buttonStyle(ChipButtonStyle(selected: draft.oled))
                     }
 
-                    row("Account") {
-                        Button("Shared account") { draft.usesOwnAccount = false }
-                            .buttonStyle(ChipButtonStyle(selected: !draft.usesOwnAccount))
-                        Button("Its own account") { draft.usesOwnAccount = true }
-                            .buttonStyle(ChipButtonStyle(selected: draft.usesOwnAccount))
-                    }
-                    if draft.usesOwnAccount {
-                        Text(draft.email.map { "Signed in as \($0)" }
-                             ?? "You'll be asked to sign in when this profile is first opened.")
+                    if draft.isOwner {
+                        // The owner IS the main account; offering "its own account" here once
+                        // pointed sign-in at an empty token slot and signed out every device.
+                        Text("The main profile. It uses your Stremio account's own watch history, like before profiles existed.")
                             .font(Theme.Typography.label)
                             .foregroundStyle(Theme.Palette.textTertiary)
                     } else {
-                        Text(draft.isOwner
-                             ? "The main profile. It uses the account's own watch history, like before profiles existed."
-                             : "Keeps its own watch history, synced through your Stremio account to your other devices.")
-                            .font(Theme.Typography.label)
-                            .foregroundStyle(Theme.Palette.textTertiary)
+                        row("Account") {
+                            Button("Shared account") { draft.usesOwnAccount = false }
+                                .buttonStyle(ChipButtonStyle(selected: !draft.usesOwnAccount))
+                            Button("Its own account") { draft.usesOwnAccount = true }
+                                .buttonStyle(ChipButtonStyle(selected: draft.usesOwnAccount))
+                        }
+                        if draft.usesOwnAccount {
+                            Text(draft.email.map { "Signed in as \($0)" }
+                                 ?? "You'll be asked to sign in when this profile is first opened.")
+                                .font(Theme.Typography.label)
+                                .foregroundStyle(Theme.Palette.textTertiary)
+                        } else {
+                            Text("Keeps its own watch history, synced through your Stremio account to your other devices.")
+                                .font(Theme.Typography.label)
+                                .foregroundStyle(Theme.Palette.textTertiary)
+                        }
                     }
 
                     row("PIN") {

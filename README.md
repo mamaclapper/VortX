@@ -42,9 +42,13 @@ Discover and Library, with proper type, catalog, genre, and sort filters:
 
 ![Library](docs/screenshots/library.png)
 
-Profiles, the feature Stremio put behind its paywall, free. Each profile has its own look, an optional PIN, and optionally its own Stremio account:
+Profiles, the feature Stremio put behind its paywall, free. Each profile has its own look, its own watch history, an optional PIN, and optionally its own Stremio account:
 
 ![Profiles](docs/screenshots/profiles.png)
+
+Settings: profiles, account, the embedded streaming server, appearance, and player preferences in one place:
+
+![Settings](docs/screenshots/settings.png)
 
 ## What you get
 
@@ -197,6 +201,7 @@ The plan for upcoming work (the native iPhone and iPad client on the engine, our
 
 ## Known issues
 
+- **Episode watched-ticks ignore profiles for now.** On a non-main profile, everything functional is per-profile (Continue Watching, resume, auto-next, the watched state your profile records), but the little checkmarks on episode lists and the manual "mark watched" buttons on detail pages still read and write the account-level flags, so they reflect the main profile's history whichever profile you are in. The fix is queued for the next release alongside the iOS port.
 - **iPhone and iPad follow Stremio's live web.** The iOS app hosts Stremio's live web interface, so a Stremio web update can occasionally disrupt it. The native iOS client on the roadmap removes this dependency.
 - **Unsigned builds.** You re-sign the IPA yourself, and depending on the signing method, reinstalling can require signing in again.
 
