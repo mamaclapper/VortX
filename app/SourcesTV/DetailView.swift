@@ -167,6 +167,7 @@ struct CoreSeasonedEpisodes: View {
     var watched: Set<String> = []
     @EnvironmentObject private var core: CoreBridge
     @EnvironmentObject private var theme: ThemeManager   // observe so accent ticks recolor on theme change
+    @EnvironmentObject private var profiles: ProfileStore   // per-profile progress + live updates
 
     @State private var season: Int = 1
 
@@ -279,6 +280,13 @@ struct CoreSeasonedEpisodes: View {
     }
 
     private func episodeProgress(_ v: CoreVideo) -> Double {
+        // Overlay profiles read their own history; the engine's library entry is
+        // account level and would show the main profile's position (same invariant
+        // as the watched ticks).
+        guard profiles.activeUsesEngineHistory else {
+            guard let entry = profiles.watch[meta.id], entry.videoId == v.id else { return 0 }
+            return entry.progress
+        }
         guard let item = core.metaDetails?.libraryItem,
               item.state.videoId == v.id,
               item.state.duration > 0 else { return 0 }
