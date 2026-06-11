@@ -19,6 +19,7 @@ struct SettingsView: View {
     @AppStorage(TrackPreferences.Key.audio) private var prefAudioLang = TrackPreferences.deviceLanguages.first ?? "en"
     @AppStorage(TrackPreferences.Key.subtitle) private var prefSubLang = TrackPreferences.deviceLanguages.first ?? "en"
     @AppStorage(PlaybackSettings.Key.directLinksOnly) private var directLinksOnly = false
+    @AppStorage(PerformanceMode.overrideKey) private var perfMode = "auto"
 
     var body: some View {
         NavigationStack {
@@ -280,6 +281,10 @@ struct SettingsView: View {
             .toggleStyle(.switch)
             .tint(Theme.Palette.accent)
             Text("Tone-maps HDR and Dolby Vision to SDR. Turn this on only if 4K Dolby Vision remuxes look washed out, green, or purple on your TV; most TVs should leave it off.")
+                .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
+
+            choiceRow("Performance", [("auto", "Auto"), ("full", "Full"), ("reduced", "Reduced")], selection: $perfMode)
+            Text("Auto keeps the full experience on capable Apple TVs and switches to a lighter one on older models like the Apple TV HD. Reduced drops the moving backdrop, trims animations, and shrinks playback buffers so the remote stays responsive on weak hardware. Restart the app after changing this.")
                 .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
         }
     }

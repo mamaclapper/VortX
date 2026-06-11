@@ -295,7 +295,13 @@ final class MPVMetalViewController: UIViewController {
         // direct CDN keeps the full buffer for network resilience. Set per file at runtime.
         let isLocalStream = url.host == "127.0.0.1" || url.host == "localhost"
             || (url.host?.hasSuffix("strem.io") ?? false)
-        mpv_set_property_string(mpv, "demuxer-max-bytes", isLocalStream ? "128MiB" : "512MiB")
+        let readAhead: String
+        if PerformanceMode.reduced {
+            readAhead = isLocalStream ? "64MiB" : "256MiB"   // 2 GB Apple TV HD: keep buffers tight
+        } else {
+            readAhead = isLocalStream ? "128MiB" : "512MiB"
+        }
+        mpv_set_property_string(mpv, "demuxer-max-bytes", readAhead)
 
         if !options.isEmpty {
             args.append(options.joined(separator: ","))
@@ -609,11 +615,13 @@ final class MPVMetalViewController: UIViewController {
                         case MPVProperty.timePos:
                             if let value = UnsafePointer<Double>(OpaquePointer(property.data))?.pointee {
                                 let now = ProcessInfo.processInfo.systemUptime
-                                // Coalesce the play head to ~4 Hz (mpv fires this per decoded frame):
-                                // smooth on the progress bar without re-rendering the player every frame.
-                                // Kept at 4 Hz, not dropped lower, so play-head smoothness is never traded
-                                // away for weak-hardware savings.
-                                if now - self.lastTimePosEmit >= 0.25 {
+                                // Coalesce the play head (mpv fires this per decoded frame). 4 Hz on
+                                // capable hardware for a smooth progress bar; 2 Hz on a constrained
+                                // Apple TV (A8) so the play-head re-render stops competing with decode
+                                // and the embedded server for its weak main thread, which is what froze
+                                // the remote during torrent playback there. Capable devices are unaffected.
+                                let minInterval = PerformanceMode.reduced ? 0.5 : 0.25
+                                if now - self.lastTimePosEmit >= minInterval {
                                     self.lastTimePosEmit = now
                                     self.emit(propertyName, value)
                                 }
