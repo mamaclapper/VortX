@@ -66,8 +66,13 @@ enum StremioServer {
         guard !PlaybackSettings.torrentsDisabled else { return }
         guard stream.url == nil, let ih = stream.infoHash?.lowercased(),
               let url = URL(string: "\(base)/\(ih)/create") else { return }
-        var sources = stream.sources ?? []
-        sources.append("dht:\(ih)")
+        // Inject the HTTP/HTTPS trackers (TorrentTrackers), exactly like the magnet and
+        // player-warmup create paths. Without this, addon torrents were created with only
+        // the addon's udp:// trackers + DHT -- all UDP, all dead in the tvOS sandbox -- so
+        // the engine announced to nothing (0 peers). This create is usually FIRST, and the
+        // engine ignores peerSearch on a torrent that already exists, so the first create's
+        // sources are the ones that stick: they must carry the TCP/TLS trackers.
+        let sources = TorrentTrackers.sources(forHash: ih, streamSources: stream.sources)
         let body: [String: Any] = [
             "torrent": ["infoHash": ih],
             "peerSearch": ["sources": sources, "min": 40, "max": 150],
