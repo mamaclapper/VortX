@@ -88,9 +88,9 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: StremioX
         CODE_SIGNING_ALLOWED: "YES"
         CODE_SIGNING_REQUIRED: "NO"
-  # Direct/debrid-only tvOS build. This omits NodeMobile and server.js entirely,
+  # Lite/debrid-only tvOS build. This omits NodeMobile and server.js entirely,
   # so the app cannot create or play torrents even if old preferences say otherwise.
-  StremioXTVDirect:
+  StremioXTVLite:
     type: application
     platform: tvOS
     sources:
@@ -111,7 +111,7 @@ targets:
       - sdk: AVKit.framework
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.stremiox.tv.direct
+        PRODUCT_BUNDLE_IDENTIFIER: com.stremiox.tv.lite
         SWIFT_OBJC_BRIDGING_HEADER: Sources/Player/StremioX-Bridging.h
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) STREMIOX_NO_EMBEDDED_SERVER"
         MARKETING_VERSION: "0.2.43"
@@ -140,10 +140,10 @@ schemes:
       config: Debug
     archive:
       config: Release
-  StremioXTVDirect:
+  StremioXTVLite:
     build:
       targets:
-        StremioXTVDirect: all
+        StremioXTVLite: all
     run:
       config: Debug
     archive:

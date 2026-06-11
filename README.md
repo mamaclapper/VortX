@@ -218,7 +218,7 @@ cd app && xcodegen generate
 # Full Apple TV build (with torrents):
 xcodebuild -scheme StremioXTV       -sdk appletvos -destination 'generic/platform=tvOS' -configuration Release CODE_SIGNING_ALLOWED=NO build
 # Lite Apple TV build (no embedded server):
-xcodebuild -scheme StremioXTVDirect -sdk appletvos -destination 'generic/platform=tvOS' -configuration Release CODE_SIGNING_ALLOWED=NO build
+xcodebuild -scheme StremioXTVLite -sdk appletvos -destination 'generic/platform=tvOS' -configuration Release CODE_SIGNING_ALLOWED=NO build
 # iOS build:
 xcodebuild -scheme StremioX         -sdk iphoneos  -destination 'generic/platform=iOS'  -configuration Release CODE_SIGNING_ALLOWED=NO build
 
