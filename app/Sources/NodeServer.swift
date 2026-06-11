@@ -67,6 +67,37 @@ enum NodeServer {
         process.on('unhandledRejection',function(e){w('[rej]',[e&&e.stack||e])});
         w('[boot]',['preload active']);
 
+        // Wake watchdog. Long tvOS suspension (overnight sleep) tears the listener
+        // sockets down; node survives (exceptions are trapped above) but the HTTP
+        // server never re-binds, so the app wakes to a dead server and only a
+        // relaunch helped. Capture every server and its listen() args, self-ping
+        // the streaming port, and re-bind dead listeners automatically.
+        var __servers=[];
+        (function(){
+          var http=require('http'); var orig=http.createServer;
+          http.createServer=function(){
+            var s=orig.apply(http,arguments); var ol=s.listen;
+            s.listen=function(){ s.__args=Array.prototype.slice.call(arguments).filter(function(a){return typeof a!=='function'}); return ol.apply(s,arguments) };
+            __servers.push(s); return s;
+          };
+        })();
+        (function(){
+          var http=require('http'); var failures=0;
+          setInterval(function(){
+            var req=http.get({host:'127.0.0.1',port:11470,path:'/settings',timeout:4000},function(res){failures=0;res.resume()});
+            function heal(){
+              if(++failures<2) return;
+              failures=0; w('[watchdog]',['server unreachable, rebinding '+__servers.length+' listeners']);
+              __servers.forEach(function(s){
+                try{ var a=s.__args||[]; s.close(function(){ try{ s.listen.apply(s,a); w('[watchdog]',['relistened on '+JSON.stringify(a)]) }catch(e){ w('[watchdog-err]',[String(e)]) } }); }
+                catch(e){ w('[watchdog-err]',[String(e)]) }
+              });
+            }
+            req.on('error',heal);
+            req.on('timeout',function(){ try{req.destroy()}catch(_){}; heal() });
+          },30000);
+        })();
+
         // Reverse-proxy stremio-web on http://127.0.0.1:11471 so the WKWebView can load the UI
         // from a loopback origin. Loopback is a secure context (Service Workers / WASM / crypto
         // all work) yet uses the http scheme, so the page AND its workers can reach the streaming
