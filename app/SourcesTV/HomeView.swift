@@ -108,6 +108,8 @@ struct CoreContinueWatchingRow: View {
     var focusModel: FocusedItemModel? = nil
     var menu: PosterMenu = .continueWatching   // .none on overlay-profile rails (engine menu doesn't apply)
     @EnvironmentObject private var theme: ThemeManager   // observe so the rail's cards repaint on a theme change
+    @EnvironmentObject private var presenter: PlayerPresenter
+    @EnvironmentObject private var profiles: ProfileStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.md) {
@@ -120,7 +122,8 @@ struct CoreContinueWatchingRow: View {
                                    menu: menu,
                                    onFocus: focusModel.map { model in
                                        { model.focus(item.focusedHero) }
-                                   })
+                                   },
+                                   directPlay: directResume(item))
                     }
                 }
                 .padding(.horizontal, Theme.Space.screenEdge)
@@ -128,6 +131,24 @@ struct CoreContinueWatchingRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Continue Watching resumes the exact link that was playing last time, straight
+    /// into the player, instead of routing through the detail page and re-resolving
+    /// sources. Falls back to the detail page when no remembered link fits: never
+    /// played here, or the engine moved the series on to a different episode.
+    private func directResume(_ item: CoreCWItem) -> (() -> Void)? {
+        guard let entry = LastStreamStore.entry(for: item.id, profileID: profiles.activeID),
+              let url = URL(string: entry.url) else { return nil }
+        if item.type == "series", let cwVideo = item.state.videoId, cwVideo != entry.videoId { return nil }
+        return {
+            presenter.request = PlaybackRequest(
+                url: url, title: entry.title,
+                meta: PlaybackMeta(libraryId: item.id, videoId: entry.videoId, type: entry.type,
+                                   name: entry.name, poster: entry.poster,
+                                   season: entry.season, episode: entry.episode),
+                episodes: [], sourceHint: entry.qualityText)
+        }
     }
 }
 

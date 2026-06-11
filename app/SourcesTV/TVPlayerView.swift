@@ -11,6 +11,7 @@ struct TVPlayerView: View {
     let title: String
     var meta: PlaybackMeta? = nil          // when set, resume + record watch progress to the library
     var episodes: [CoreVideo] = []             // series' ordered episodes (empty for movies) → Next/Prev/list
+    var sourceHint: String? = nil              // quality signature of the launching stream (source continuity)
     var onClose: () -> Void = {}           // dismiss the dedicated player window
 
     @EnvironmentObject private var account: StremioAccount
@@ -61,6 +62,11 @@ struct TVPlayerView: View {
     // Next-episode preload: fetched + ranked in the background mid-episode so auto-advance is instant.
     @State private var preloaded: PreloadedEpisode?
     @State private var preloadingID: String?
+    @State private var warmedID: String?               // next episode whose source was pre-warmed
+    @State private var curHint: String?                // quality signature of what is playing now
+    // Direct-resume launches (Continue Watching) start without an episode list;
+    // it loads in the background so Next/auto-advance still work.
+    @State private var loadedEpisodes: [CoreVideo] = []
 
     /// Which on-screen control is currently highlighted (driven by remote left/right, not SwiftUI focus).
     private enum Control: Hashable { case close, scrub, restart, back, play, fwd, audio, subs, aspect, prev, next, episodes, sources }
@@ -99,6 +105,13 @@ struct TVPlayerView: View {
                             if d > 0, !hasStartedPlaying {            // playback actually began
                                 hasStartedPlaying = true; loadTimeout?.cancel(); loadFailed = false
                                 autoRetryCount = 0; reconnecting = false; autoRetryTask?.cancel()   // playback started: clear auto-recovery
+                                if let m = curMeta, let u = curURL {   // remember the working link for direct resume
+                                    LastStreamStore.record(libraryId: m.libraryId, entry: .init(
+                                        videoId: m.videoId, url: u.absoluteString, title: curTitle,
+                                        season: m.season, episode: m.episode, name: m.name,
+                                        poster: m.poster, type: m.type, qualityText: curHint, savedAt: Date()),
+                                        profileID: ProfileStore.shared.activeID)
+                                }
                             }
                             currentTime = d
                             if lastSaved < 0 || abs(d - lastSaved) >= 20 {   // persist ~every 20s
@@ -111,6 +124,7 @@ struct TVPlayerView: View {
                                 core.markPlaybackWatched(m)
                             }
                             if duration > 0, d / duration >= 0.5 { preloadNextIfNeeded() }   // halfway → ready the next episode
+                            if duration > 0, duration - d <= 100 { warmNextIfReady() }       // near the end → wake the provider
                         }
                     case MPVProperty.videoParamsSigPeak:
                         if let p = data as? Double { isHDR = p > 1.0 }
@@ -156,6 +170,23 @@ struct TVPlayerView: View {
         }
         .onAppear {
             if curURL == nil { curURL = url; curTitle = title; curMeta = meta }   // seed from initial
+            if curHint == nil { curHint = sourceHint }
+            if episodes.isEmpty, let m = curMeta, m.type == "series", loadedEpisodes.isEmpty {
+                // Direct resume launched without the episode list; fetch it behind
+                // playback so Next, the episode panel, and auto-advance still work.
+                Task {
+                    core.loadMeta(type: "series", id: m.libraryId, streamType: "series", streamId: m.videoId)
+                    for _ in 0..<40 {
+                        if let loaded = core.metaDetails?.meta, loaded.id == m.libraryId,
+                           let vids = loaded.videos, !vids.isEmpty {
+                            loadedEpisodes = vids
+                            plog.info("episode list loaded behind direct resume: \(vids.count)")
+                            break
+                        }
+                        try? await Task.sleep(for: .milliseconds(250))
+                    }
+                }
+            }
             showInfo = true; selected = .play; scheduleHide(); startLoadTimeout()
             UIApplication.shared.isIdleTimerDisabled = true   // stop the Apple TV screensaver during playback
             if let m = curMeta {
@@ -231,15 +262,15 @@ struct TVPlayerView: View {
     /// bar) are separate rows above this one; up/down moves between the three.
     private var buttonRow: [Control] {
         var c: [Control] = [.restart, .back]
-        if episodes.count > 1 && hasPrevEpisode { c.append(.prev) }
+        if allEpisodes.count > 1 && hasPrevEpisode { c.append(.prev) }
         c.append(.play)
-        if episodes.count > 1 && hasNextEpisode { c.append(.next) }
+        if allEpisodes.count > 1 && hasNextEpisode { c.append(.next) }
         c.append(.fwd)
         if !audioTracks.isEmpty { c.append(.audio) }
         c.append(.subs)
         c.append(.aspect)
         if hasAlternateSources { c.append(.sources) }   // was drawn but missing here → unreachable by remote
-        if episodes.count > 1 { c.append(.episodes) }
+        if allEpisodes.count > 1 { c.append(.episodes) }
         return c
     }
 
@@ -356,9 +387,9 @@ struct TVPlayerView: View {
                     HStack(spacing: Theme.Space.md) {
                         ctrlButton(.restart, "arrow.counterclockwise")
                         ctrlButton(.back, "gobackward.10")
-                        if episodes.count > 1 && hasPrevEpisode { ctrlButton(.prev, "backward.end.fill") }
+                        if allEpisodes.count > 1 && hasPrevEpisode { ctrlButton(.prev, "backward.end.fill") }
                         ctrlButton(.play, isPaused ? "play.fill" : "pause.fill", big: true)
-                        if episodes.count > 1 && hasNextEpisode { ctrlButton(.next, "forward.end.fill") }
+                        if allEpisodes.count > 1 && hasNextEpisode { ctrlButton(.next, "forward.end.fill") }
                         ctrlButton(.fwd, "goforward.10")
                     }
                     HStack(spacing: Theme.Space.md) {
@@ -366,7 +397,7 @@ struct TVPlayerView: View {
                         ctrlButton(.subs, "captions.bubble")
                         ctrlButton(.aspect, "aspectratio")
                         if hasAlternateSources { ctrlButton(.sources, "rectangle.2.swap") }
-                        if episodes.count > 1 { ctrlButton(.episodes, "list.bullet") }
+                        if allEpisodes.count > 1 { ctrlButton(.episodes, "list.bullet") }
                     }
                     .frame(maxWidth: .infinity, alignment: .trailing)
                 }
@@ -471,7 +502,7 @@ struct TVPlayerView: View {
                 OptionRow(label: "Stretch  ·  fill, distort", isSelected: mode == "stretch") { coordinator.player?.setVideoSize("stretch") },
             ]
         case .episodes:
-            return episodes.map { ep in
+            return allEpisodes.map { ep in
                 OptionRow(label: "E\(ep.episodeNumber)  ·  \(ep.episodeTitle)", isSelected: ep.id == curMeta?.videoId) {
                     play(episode: ep)
                 }
@@ -810,12 +841,14 @@ struct TVPlayerView: View {
 
     // MARK: - Episode navigation (series only; `episodes` is the season's ordered list)
 
-    private var episodeIndex: Int? { episodes.firstIndex { $0.id == curMeta?.videoId } }
-    private var hasNextEpisode: Bool { episodeIndex.map { $0 + 1 < episodes.count } ?? false }
+    private var allEpisodes: [CoreVideo] { episodes.isEmpty ? loadedEpisodes : episodes }
+
+    private var episodeIndex: Int? { allEpisodes.firstIndex { $0.id == curMeta?.videoId } }
+    private var hasNextEpisode: Bool { episodeIndex.map { $0 + 1 < allEpisodes.count } ?? false }
     private var hasPrevEpisode: Bool { (episodeIndex ?? 0) > 0 }
 
-    private func playNext() { if let i = episodeIndex, i + 1 < episodes.count { play(episode: episodes[i + 1]) } }
-    private func playPrevious() { if let i = episodeIndex, i > 0 { play(episode: episodes[i - 1]) } }
+    private func playNext() { if let i = episodeIndex, i + 1 < allEpisodes.count { play(episode: allEpisodes[i + 1]) } }
+    private func playPrevious() { if let i = episodeIndex, i > 0 { play(episode: allEpisodes[i - 1]) } }
 
     /// Auto-advance when an episode ends: next episode if there is one, otherwise leave the player.
     private func autoAdvance() {
@@ -846,6 +879,8 @@ struct TVPlayerView: View {
         // The preload already fetched and ranked this episode across every add-on → play it now.
         if let pre = preloaded, pre.episodeID == v.id, let u = pre.stream.playableURL {
             preloaded = nil
+            warmedID = nil
+            curHint = pre.signature
             plog.info("episode switch: playing preloaded best source")
             prepareTorrent(pre.stream)
             curURL = u
@@ -902,12 +937,12 @@ struct TVPlayerView: View {
     /// The next episode's best stream, resolved in the background mid-episode. Fetched over the
     /// add-on HTTP protocol directly so the engine's `meta_details` (which the screen behind the
     /// player still shows) is never disturbed.
-    private struct PreloadedEpisode { let episodeID: String; let stream: CoreStream }
+    private struct PreloadedEpisode { let episodeID: String; let stream: CoreStream; let signature: String }
 
     /// Kick off the preload once per episode, triggered when playback crosses the halfway mark.
     private func preloadNextIfNeeded() {
-        guard let i = episodeIndex, i + 1 < episodes.count else { return }
-        let next = episodes[i + 1]
+        guard let i = episodeIndex, i + 1 < allEpisodes.count else { return }
+        let next = allEpisodes[i + 1]
         guard preloaded?.episodeID != next.id, preloadingID != next.id else { return }
         preloadingID = next.id
         let sources = account.streamSources
@@ -925,8 +960,8 @@ struct TVPlayerView: View {
             let order = Dictionary(sources.enumerated().map { ($1.base, $0) },
                                    uniquingKeysWith: { first, _ in first })
             groups.sort { (order[$0.id] ?? .max) < (order[$1.id] ?? .max) }
-            if let best = StreamRanking.best(groups) {
-                preloaded = PreloadedEpisode(episodeID: next.id, stream: best)
+            if let best = StreamRanking.best(groups, continuity: curHint) {
+                preloaded = PreloadedEpisode(episodeID: next.id, stream: best, signature: StreamRanking.signature(best))
                 plog.info("preload ready: \(StreamRanking.qualityLabel(best), privacy: .public) for \(next.id, privacy: .public)")
             } else {
                 plog.info("preload found nothing for \(next.id, privacy: .public)")
@@ -946,6 +981,26 @@ struct TVPlayerView: View {
               let response = try? JSONDecoder().decode(Response.self, from: data),
               let streams = response.streams, !streams.isEmpty else { return nil }
         return CoreStreamSourceGroup(id: base, addon: addon, streams: streams)
+    }
+
+    /// One ranged read of the chosen next-episode source shortly before the
+    /// credits, so the provider has the file hot when auto-advance opens it; the
+    /// cold start there is what used to cost 30 to 60 seconds. Torrents start
+    /// their peer search at the same moment.
+    private func warmNextIfReady() {
+        guard let pre = preloaded, warmedID != pre.episodeID, let url = pre.stream.playableURL else { return }
+        warmedID = pre.episodeID
+        prepareTorrent(pre.stream)
+        var request = URLRequest(url: url)
+        request.setValue("bytes=0-16777215", forHTTPHeaderField: "Range")   // first 16 MB
+        request.timeoutInterval = 60
+        let log = plog
+        let id = pre.episodeID
+        log.info("warming next episode source for \(id, privacy: .public)")
+        Task.detached(priority: .utility) {
+            let size = (try? await URLSession.shared.data(for: request))?.0.count ?? -1
+            log.info("warm result for \(id, privacy: .public): \(size) bytes")
+        }
     }
 
     /// Torrents: ask the embedded server to start fetching peers before playback. No-op for url/debrid.

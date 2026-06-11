@@ -401,6 +401,7 @@ struct PosterCard: View {
     var width: CGFloat = kPosterWidth
     var menu: PosterMenu = .none
     var onFocus: (() -> Void)? = nil   // browse pages report focus to drive the hero backdrop
+    var directPlay: (() -> Void)? = nil   // Continue Watching: resume the same link straight into the player
 
     var body: some View {
         if menu == .none {
@@ -410,10 +411,22 @@ struct PosterCard: View {
         }
     }
 
-    private var cardLink: some View {
-        NavigationLink {
-            DetailView(type: type, id: id)
-        } label: {
+    @ViewBuilder private var cardLink: some View {
+        if let directPlay {
+            Button(action: directPlay) { cardLabel }
+                .buttonStyle(CardFocusStyle())
+        } else {
+            NavigationLink { DetailView(type: type, id: id) } label: { cardLabel }
+                .buttonStyle(CardFocusStyle())
+        }
+    }
+
+    private var cardLabel: some View {
+        legacyCardLabel
+    }
+
+    private var legacyCardLabel: some View {
+        Group {
             VStack(alignment: .leading, spacing: Theme.Space.sm) {
                 PosterArt(poster, width: width)
                     .overlay(alignment: .bottom) {
@@ -430,7 +443,6 @@ struct PosterCard: View {
             }
             .background { if let onFocus { FocusReporter(onFocus: onFocus) } }
         }
-        .buttonStyle(CardFocusStyle())
     }
 
     /// Long-press actions, fired straight at the engine (`CoreBridge.shared`). Continue Watching and the
