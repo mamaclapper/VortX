@@ -9,6 +9,9 @@ struct PlaybackRequest: Identifiable {
     let title: String
     var meta: PlaybackMeta? = nil
     var episodes: [CoreVideo] = []
+    /// Quality signature of the stream being played, so auto-next can prefer the
+    /// same release family for the following episode.
+    var sourceHint: String? = nil
 }
 
 /// Holds the active playback request. Set it to present the player; clear it to dismiss.
@@ -39,6 +42,7 @@ struct RootView: View {
                 .disabled(presenter.request != nil)
             if let req = presenter.request {
                 TVPlayerView(url: req.url, title: req.title, meta: req.meta, episodes: req.episodes,
+                             sourceHint: req.sourceHint,
                              onClose: { presenter.request = nil })
                     .id(req.id)   // clean player teardown per request
             }

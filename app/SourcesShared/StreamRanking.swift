@@ -7,6 +7,36 @@ import Foundation
 /// from the stream's name + description + filename, where add-ons put their tags. Deliberately simple:
 /// seeders matter mainly for raw torrents, which a debrid user rarely lands on.
 enum StreamRanking {
+    /// The stream's quality text, exposed for source-continuity hints.
+    static func signature(_ s: CoreStream) -> String { qualityText(s) }
+
+    /// Prefer the next episode from the same release family as what is playing:
+    /// same resolution and flavor usually means the same release group, which the
+    /// provider often already has hot.
+    static func continuityBonus(_ s: CoreStream, hint: String?) -> Int {
+        guard let hint, !hint.isEmpty else { return 0 }
+        let text = qualityText(s)
+        var bonus = 0
+        for res in ["2160", "1080", "720"] where hint.contains(res) {
+            if text.contains(res) { bonus += 800 }
+            break
+        }
+        if hint.contains("remux"), text.contains("remux") { bonus += 500 }
+        else if hint.contains("web"), text.contains("web") { bonus += 300 }
+        let hdrTokens = ["hdr", "dovi", "dolby vision", "dolbyvision"]
+        if hdrTokens.contains(where: hint.contains), hdrTokens.contains(where: text.contains) { bonus += 300 }
+        return bonus
+    }
+
+    /// best() with the continuity bonus applied on top of the base score.
+    static func best(_ groups: [CoreStreamSourceGroup], continuity hint: String?) -> CoreStream? {
+        guard let hint, !hint.isEmpty else { return best(groups) }
+        let candidates = groups.flatMap { $0.streams }.filter { $0.playableURL != nil }
+        return candidates.max { lhs, rhs in
+            (score(lhs) + continuityBonus(lhs, hint: hint)) < (score(rhs) + continuityBonus(rhs, hint: hint))
+        }
+    }
+
     static func score(_ s: CoreStream) -> Int {
         let text = qualityText(s)
         var score = resolution(text)
