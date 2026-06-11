@@ -17,21 +17,21 @@ That is the gap StremioX closes. It is a native Apple TV client built on stremio
 
 One thing worth being straight about: I didn't hand-write the code. Claude (Anthropic's AI) wrote all of it. My part was the direction and the grind. I ran every build on my own Apple TV, signed into my own account, kept finding the parts that were broken or felt off, and sent it back to redo until it was genuinely good enough to use every day. So this is "an AI wrote it and a real person beat it into shape," not a one-shot generated repo. A small but growing group of community contributors has since pitched in too (see Credits).
 
-## Two builds: Full and Direct
+## Two builds: Full and Lite
 
 The Apple TV release ships in two flavors. Pick one; they are the same app otherwise, and your account, profiles, and settings are identical between them.
 
-| | **StremioX (Full)** | **StremioX Direct** |
+| | **StremioX (Full)** | **StremioX Lite** |
 |---|---|---|
-| File | `StremioX-tvOS-x.y.z.ipa` (~48 MB) | `StremioX-tvOS-direct-x.y.z.ipa` (~31 MB) |
+| File | `StremioX-tvOS-x.y.z.ipa` (~48 MB) | `StremioX-tvOS-lite-x.y.z.ipa` (~31 MB) |
 | Torrents and magnets | Yes, via the embedded streaming server | No, cannot play them at all |
 | Embedded streaming server | Bundled and running | Not bundled |
 | Direct and debrid links (Real-Debrid, TorBox, Premiumize, usenet resolved to http) | Yes | Yes |
 | Best for | Everyone who wants torrent support | Debrid-only users who never want a peer connection without a VPN |
 
-**Why a Direct build exists.** When you play a torrent your device joins a peer-to-peer swarm, and your IP is visible to everyone in it. Debrid and direct links are ordinary HTTPS downloads with none of that exposure. If you only ever stream through a debrid service, the Direct build removes the torrent engine entirely, so there is no way to accidentally start a peer connection, and the app is smaller and starts faster.
+**Why a Lite build exists.** When you play a torrent your device joins a peer-to-peer swarm, and your IP is visible to everyone in it. Debrid and direct links are ordinary HTTPS downloads with none of that exposure. If you only ever stream through a debrid service, the Lite build removes the torrent engine entirely, so there is no way to accidentally start a peer connection, and the app is smaller and starts faster.
 
-**You do not need the Direct build to get this safety.** The Full build has a **Direct Links Only** switch in Settings that hides every torrent and magnet source and keeps the engine off. The Direct build is simply that choice made permanent, for people who would rather the capability not be present at all.
+**You do not need the Lite build to get this safety.** The Full build has a **Direct Links Only** switch in Settings that hides every torrent and magnet source and keeps the engine off. The Lite build is simply that choice made permanent, for people who would rather the capability not be present at all.
 
 ## What it looks like (Apple TV)
 
@@ -130,7 +130,7 @@ Everything the Apple TV app does today:
 **The rest**
 
 - Eight accent themes plus a true-black OLED mode; the whole app, including the focused tab, repaints live when you switch.
-- Direct Links Only toggle to hide torrents and keep the engine off (the Direct build makes this permanent).
+- Direct Links Only toggle to hide torrents and keep the engine off (the Lite build makes this permanent).
 - A one-press Restart in Settings, since Apple TV has no force quit, to bring the embedded server back if it ever needs it.
 - An in-app update notice that checks for new releases and tells you when one is out.
 - A branded launch splash that honors Reduce Motion, a screen that stays awake during playback and sleeps when paused, and the option to point at your own streaming server.
@@ -139,7 +139,7 @@ Everything the Apple TV app does today:
 
 The builds are attached to the [latest release](../../releases/latest). They are unsigned because this is a third-party client distributed outside the App Store, so you re-sign them yourself with one of the methods below. None require a jailbreak.
 
-Grab the IPA you need from the latest release. For Apple TV, decide between the **Full** build (`StremioX-tvOS-x.y.z.ipa`, torrents included) and the smaller **Direct** build (`StremioX-tvOS-direct-x.y.z.ipa`, debrid and direct links only); see "Two builds" above. The iOS IPA covers iPhone and iPad.
+Grab the IPA you need from the latest release. For Apple TV, decide between the **Full** build (`StremioX-tvOS-x.y.z.ipa`, torrents included) and the smaller **Lite** build (`StremioX-tvOS-lite-x.y.z.ipa`, debrid and direct links only); see "Two builds" above. The iOS IPA covers iPhone and iPad.
 
 ### The trade-off to understand first
 
@@ -181,7 +181,7 @@ Apple only runs apps signed by a valid identity, and what you sign with decides 
 
 ### Updating
 
-Install the new version's IPA over the old one with the same method and the same Apple ID; your sign-in, profiles, and settings carry over. If you switch signing identities, iOS treats it as a different app and you start fresh. You can move between the Full and Direct builds the same way.
+Install the new version's IPA over the old one with the same method and the same Apple ID; your sign-in, profiles, and settings carry over. If you switch signing identities, iOS treats it as a different app and you start fresh. You can move between the Full and Lite builds the same way.
 
 ## Security and privacy
 
@@ -217,7 +217,7 @@ You'll need macOS with Xcode, [XcodeGen](https://github.com/yonaskolb/XcodeGen),
 cd app && xcodegen generate
 # Full Apple TV build (with torrents):
 xcodebuild -scheme StremioXTV       -sdk appletvos -destination 'generic/platform=tvOS' -configuration Release CODE_SIGNING_ALLOWED=NO build
-# Direct Apple TV build (no embedded server):
+# Lite Apple TV build (no embedded server):
 xcodebuild -scheme StremioXTVDirect -sdk appletvos -destination 'generic/platform=tvOS' -configuration Release CODE_SIGNING_ALLOWED=NO build
 # iOS build:
 xcodebuild -scheme StremioX         -sdk iphoneos  -destination 'generic/platform=iOS'  -configuration Release CODE_SIGNING_ALLOWED=NO build
@@ -252,13 +252,13 @@ This is an independent community project. It is not affiliated with or endorsed 
 - [mpv](https://mpv.io/) and [MPVKit](https://github.com/mpvkit/MPVKit), for the player.
 - [nodejs-mobile](https://github.com/nodejs-mobile/nodejs-mobile), for the embedded server runtime.
 - Claude (Anthropic) wrote the code.
-- [OrigamiSpace](https://github.com/OrigamiSpace), the first and most prolific community contributor: QR sign-in, live search, the Resume/Play hero and watched-state controls, the tab bar and focus fixes on real hardware, verified CI release builds, the Direct Links Only mode and the StremioX Direct build, and the build-from-source report that made a fresh clone work for everyone.
+- [OrigamiSpace](https://github.com/OrigamiSpace), the first and most prolific community contributor: QR sign-in, live search, the Resume/Play hero and watched-state controls, the tab bar and focus fixes on real hardware, verified CI release builds, the Direct Links Only mode and the StremioX Lite build, and the build-from-source report that made a fresh clone work for everyone.
 
 See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for the full list.
 
 ## A note on the bundled streaming server
 
-The Full IPAs include `server.js`, the streaming server's own proprietary file, distributed for free inside the official apps. StremioX has not modified it and claims no rights to it; it is bundled only so the app works out of the box. The Direct build omits it entirely. Swapping it for an open-source streaming server is on the [roadmap](ROADMAP.md).
+The Full IPAs include `server.js`, the streaming server's own proprietary file, distributed for free inside the official apps. StremioX has not modified it and claims no rights to it; it is bundled only so the app works out of the box. The Lite build omits it entirely. Swapping it for an open-source streaming server is on the [roadmap](ROADMAP.md).
 
 ## Star History
 

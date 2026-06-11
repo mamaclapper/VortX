@@ -120,7 +120,7 @@ targets:
         GENERATE_INFOPLIST_FILE: "YES"
         INFOPLIST_FILE: ResourcesTV/Info-tvOS.plist
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: "YES"
-        INFOPLIST_KEY_CFBundleDisplayName: StremioX Direct
+        INFOPLIST_KEY_CFBundleDisplayName: StremioX Lite
         CODE_SIGNING_ALLOWED: "YES"
         CODE_SIGNING_REQUIRED: "NO"
 schemes:
