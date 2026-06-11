@@ -4,6 +4,7 @@ import Foundation
 /// resume the same link directly instead of routing through the detail page and
 /// re-resolving sources. Links can expire (debrid URLs are time-limited); the
 /// player's existing load-failure overlay is the fallback when one has.
+@MainActor
 enum LastStreamStore {
     struct Entry: Codable {
         var videoId: String
@@ -15,14 +16,25 @@ enum LastStreamStore {
         var poster: String?
         var type: String
         var qualityText: String?
+        var torrent: Bool? = nil
         var savedAt: Date
     }
 
     private static func key(_ profileID: UUID) -> String { "stremiox.lastStream.\(profileID.uuidString)" }
 
+    /// Decoded once per profile and kept in memory: entry() runs in the Continue
+    /// Watching cards' render path, and decoding the JSON dict per card per render
+    /// was measurable jank on device.
+    private static var cache: [UUID: [String: Entry]] = [:]
+
     private static func load(_ profileID: UUID) -> [String: Entry] {
-        guard let data = UserDefaults.standard.data(forKey: key(profileID)),
-              let dict = try? JSONDecoder().decode([String: Entry].self, from: data) else { return [:] }
+        if let cached = cache[profileID] { return cached }
+        var dict: [String: Entry] = [:]
+        if let data = UserDefaults.standard.data(forKey: key(profileID)),
+           let decoded = try? JSONDecoder().decode([String: Entry].self, from: data) {
+            dict = decoded
+        }
+        cache[profileID] = dict
         return dict
     }
 
@@ -39,6 +51,7 @@ enum LastStreamStore {
             dict = Dictionary(uniqueKeysWithValues:
                 dict.sorted { $0.value.savedAt > $1.value.savedAt }.prefix(50).map { ($0.key, $0.value) })
         }
+        cache[profileID] = dict
         if let data = try? JSONEncoder().encode(dict) {
             UserDefaults.standard.set(data, forKey: key(profileID))
         }

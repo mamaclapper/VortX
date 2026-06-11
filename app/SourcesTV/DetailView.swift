@@ -680,7 +680,7 @@ struct CoreStreamList: View {
         core.loadEnginePlayer(for: stream)
         prepareTorrent(stream)
         presenter.request = PlaybackRequest(url: url, title: title, meta: meta, episodes: episodes,
-                                            sourceHint: StreamRanking.signature(stream))
+                                            sourceHint: StreamRanking.signature(stream), torrent: stream.isTorrent)
     }
 
     private func filterBar(_ groups: [CoreStreamSourceGroup], total: Int) -> some View {

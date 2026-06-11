@@ -147,7 +147,7 @@ struct CoreContinueWatchingRow: View {
                 meta: PlaybackMeta(libraryId: item.id, videoId: entry.videoId, type: entry.type,
                                    name: entry.name, poster: entry.poster,
                                    season: entry.season, episode: entry.episode),
-                episodes: [], sourceHint: entry.qualityText)
+                episodes: [], sourceHint: entry.qualityText, torrent: entry.torrent ?? false)
         }
     }
 }
