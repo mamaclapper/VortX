@@ -12,6 +12,9 @@ struct PlaybackRequest: Identifiable {
     /// Quality signature of the stream being played, so auto-next can prefer the
     /// same release family for the following episode.
     var sourceHint: String? = nil
+    /// True when the stream rides the embedded torrent engine, which needs warm-up
+    /// patience the player gives it.
+    var torrent: Bool = false
 }
 
 /// Holds the active playback request. Set it to present the player; clear it to dismiss.
@@ -42,7 +45,7 @@ struct RootView: View {
                 .disabled(presenter.request != nil)
             if let req = presenter.request {
                 TVPlayerView(url: req.url, title: req.title, meta: req.meta, episodes: req.episodes,
-                             sourceHint: req.sourceHint,
+                             sourceHint: req.sourceHint, torrent: req.torrent,
                              onClose: { presenter.request = nil })
                     .id(req.id)   // clean player teardown per request
             }

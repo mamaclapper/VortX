@@ -12,6 +12,7 @@ struct TVPlayerView: View {
     var meta: PlaybackMeta? = nil          // when set, resume + record watch progress to the library
     var episodes: [CoreVideo] = []             // series' ordered episodes (empty for movies) → Next/Prev/list
     var sourceHint: String? = nil              // quality signature of the launching stream (source continuity)
+    var torrent: Bool = false                  // stream rides the embedded torrent engine (gets warm-up patience)
     var onClose: () -> Void = {}           // dismiss the dedicated player window
 
     @EnvironmentObject private var account: StremioAccount
@@ -67,6 +68,9 @@ struct TVPlayerView: View {
     // Direct-resume launches (Continue Watching) start without an episode list;
     // it loads in the background so Next/auto-advance still work.
     @State private var loadedEpisodes: [CoreVideo] = []
+    @State private var curIsTorrent = false             // current stream is a torrent (switches/auto-next update it)
+    @State private var torrentStatus: String?           // live warm-up line ("Connecting to peers · 12 connected")
+    @State private var torrentWarmupsUsed = 0           // bounded warm-up rounds before the error overlay
     @State private var playSpeed = 1.0                  // mpv playback speed (sticky for the session)
     @State private var showStats = false                // live playback info overlay
     @State private var statsRows: [(String, String)] = []
@@ -112,7 +116,8 @@ struct TVPlayerView: View {
                                     LastStreamStore.record(libraryId: m.libraryId, entry: .init(
                                         videoId: m.videoId, url: u.absoluteString, title: curTitle,
                                         season: m.season, episode: m.episode, name: m.name,
-                                        poster: m.poster, type: m.type, qualityText: curHint, savedAt: Date()),
+                                        poster: m.poster, type: m.type, qualityText: curHint,
+                                        torrent: curIsTorrent, savedAt: Date()),
                                         profileID: ProfileStore.shared.activeID)
                                 }
                             }
@@ -159,7 +164,10 @@ struct TVPlayerView: View {
             if buffering && !loadFailed {
                 VStack(spacing: Theme.Space.md) {
                     BigSpinner()
-                    if reconnecting {
+                    if let torrentStatus {
+                        Text(torrentStatus)
+                            .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
+                    } else if reconnecting {
                         Text("Reconnecting…  (\(autoRetryCount)/\(maxAutoRetries))")
                             .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
                     }
@@ -173,7 +181,7 @@ struct TVPlayerView: View {
             if showStats, !loadFailed { statsOverlay }
         }
         .onAppear {
-            if curURL == nil { curURL = url; curTitle = title; curMeta = meta }   // seed from initial
+            if curURL == nil { curURL = url; curTitle = title; curMeta = meta; curIsTorrent = torrent }   // seed from initial
             if curHint == nil { curHint = sourceHint }
             if episodes.isEmpty, let m = curMeta, m.type == "series", loadedEpisodes.isEmpty {
                 // Direct resume launched without the episode list; fetch it behind
@@ -641,6 +649,9 @@ struct TVPlayerView: View {
         guard let newURL = stream.playableURL, newURL != curURL else { closePanel(); return }
         closePanel()
         curURL = newURL
+        curIsTorrent = stream.isTorrent
+        torrentWarmupsUsed = 0; torrentStatus = nil
+        prepareTorrent(stream)   // mid-playback switches never announced the torrent before
         resumeSeconds = currentTime
         appliedResume = false
         buffering = true; hasStartedPlaying = false; appliedAutoTracks = false; loadErrorMsg = ""
@@ -795,9 +806,88 @@ struct TVPlayerView: View {
         loadTimeout = Task { @MainActor in
             try? await Task.sleep(for: .seconds(30))
             guard !hasStartedPlaying else { return }
+            if isTorrentPlayback {
+                warmUpTorrent()
+                return
+            }
             if loadErrorMsg.isEmpty { loadErrorMsg = "Timed out, the source never started." }
             withAnimation { loadFailed = true }
         }
+    }
+
+    /// Decided by the URL shape alone ({server}:11470/{40-hex-hash}/{idx}), which
+    /// every torrent URL has and nothing else does; the launch-path flag can go
+    /// stale across engine-resolved episode switches, so it is only recorded, not
+    /// trusted here.
+    private var isTorrentPlayback: Bool {
+        guard let u = curURL, u.port == 11470, u.pathComponents.count >= 3 else { return false }
+        let hash = u.pathComponents[1]
+        return hash.count == 40 && hash.allSatisfy(\.isHexDigit)
+    }
+
+    /// What official Stremio does that a bare mpv open does not: wait for the
+    /// torrent engine. A cold swarm needs tens of seconds before its first useful
+    /// bytes (22s TTFB measured on a WELL-seeded torrent), and early reads come
+    /// back truncated, so mpv fails its demux instantly and the quick auto-retries
+    /// burn out in seconds. Poll the engine's stats until a few MB are actually
+    /// down, narrating peer count and speed, then hand mpv the URL again.
+    private func warmUpTorrent() {
+        guard torrentWarmupsUsed < 2, let u = curURL, u.pathComponents.count >= 2 else {
+            if loadErrorMsg.isEmpty { loadErrorMsg = "The torrent never started sending data. Try another source." }
+            reconnecting = false; torrentStatus = nil
+            withAnimation { loadFailed = true }
+            return
+        }
+        torrentWarmupsUsed += 1
+        let hash = u.pathComponents[1]
+        buffering = true
+        withAnimation { reconnecting = true }
+        torrentStatus = "Starting torrent…"
+        plog.info("torrent warm-up round \(torrentWarmupsUsed) for \(hash, privacy: .public)")
+        DiagnosticsLog.log("player", "torrent warm-up round \(torrentWarmupsUsed) for \(hash)")
+        loadTimeout?.cancel()
+        autoRetryTask?.cancel()
+        autoRetryTask = Task { @MainActor in
+            let deadline = Date().addingTimeInterval(90)
+            var warm = false
+            while Date() < deadline, !Task.isCancelled, !hasStartedPlaying {
+                if let stats = await Self.torrentStats(hash: hash) {
+                    let peers = stats.swarmConnections ?? stats.peers ?? 0
+                    let speed = stats.downloadSpeed ?? 0
+                    var line = "Connecting to peers · \(peers) connected"
+                    if speed > 10_000 { line += String(format: " · %.1f MB/s", speed / 1_048_576) }
+                    torrentStatus = line
+                    if (stats.downloaded ?? 0) > 3_000_000 { warm = true; break }   // a few MB down = mpv can demux
+                }
+                try? await Task.sleep(for: .seconds(2))
+            }
+            guard !Task.isCancelled, !hasStartedPlaying else { torrentStatus = nil; return }
+            torrentStatus = nil
+            if warm {
+                plog.info("torrent warm, handing back to mpv")
+                DiagnosticsLog.log("player", "torrent warm, reloading")
+                retryLoad(resetAutoRetries: true)
+            } else {
+                loadErrorMsg = "The torrent never started sending data. Try another source."
+                reconnecting = false
+                withAnimation { loadFailed = true }
+            }
+        }
+    }
+
+    private struct TorrentStats: Decodable {
+        let peers: Int?
+        let swarmConnections: Int?
+        let downloaded: Double?
+        let downloadSpeed: Double?
+    }
+
+    private static func torrentStats(hash: String) async -> TorrentStats? {
+        guard let url = URL(string: "\(StremioServer.base)/\(hash)/stats.json") else { return nil }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 4
+        guard let (data, _) = try? await URLSession.shared.data(for: request) else { return nil }
+        return try? JSONDecoder().decode(TorrentStats.self, from: data)
     }
 
     /// A pre-playback failure (an endFileError before the first frame). Auto-retry up to `maxAutoRetries`
@@ -806,6 +896,11 @@ struct TVPlayerView: View {
     private func handleLoadFailure(_ msg: String) {
         guard !hasStartedPlaying, !loadFailed else { return }
         loadErrorMsg = msg
+        if isTorrentPlayback {
+            // The engine simply isn't warm yet; quick mpv retries just burn out.
+            warmUpTorrent()
+            return
+        }
         guard autoRetryCount < maxAutoRetries else {
             reconnecting = false
             withAnimation { loadFailed = true }
@@ -938,6 +1033,8 @@ struct TVPlayerView: View {
             preloaded = nil
             warmedID = nil
             curHint = pre.signature
+            curIsTorrent = pre.stream.isTorrent
+            torrentWarmupsUsed = 0; torrentStatus = nil
             plog.info("episode switch: playing preloaded best source")
             prepareTorrent(pre.stream)
             curURL = u
