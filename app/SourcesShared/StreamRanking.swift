@@ -58,9 +58,30 @@ enum StreamRanking {
         if text.contains("hdr") || text.contains("dolby vision") || text.contains("dolbyvision") || text.contains("dovi") {
             score += 80
         }
+        // File size is the strongest objective quality signal WITHIN a resolution tier: a 4K remux is
+        // 30-80 GB, a 4K WEB-DL is 3-10 GB, and bigger means higher bitrate. Without this, Watch Now
+        // saw a basic 4K and a 4K remux as near-ties and played whichever add-on answered first. Scaled
+        // and capped (~600) so it decides between same-resolution sources but never lifts a 1080p over a 4K.
+        score += min(Int(sizeGB(text) * 6), 600)
+        // Lossless / object-based audio is a real upgrade on a capable system (eARC soundbar, AV receiver),
+        // so it breaks remaining ties toward the better-sounding source.
+        if text.contains("atmos") || text.contains("truehd") || text.contains("true-hd") { score += 70 }
+        else if text.contains("dts-hd") || text.contains("dts hd") || text.contains("dts-ma") { score += 50 }
+        else if text.contains("dts") { score += 20 }
         if isCached(s, text) { score += 8000 }   // cached / direct = instant; outranks any non-cached quality
         if isRealDebrid(text) { score -= 20000 } // RD purged its cache + throttles; last resort only
         return score
+    }
+
+    /// File size in GB parsed from the add-on's stream text (name / description / filename),
+    /// where most add-ons print it (e.g. "💾 54.3 GB"). 0 when absent or only MB-sized.
+    private static func sizeGB(_ t: String) -> Double {
+        guard let m = t.range(of: #"(\d+(?:\.\d+)?)\s*g(i)?b"#, options: .regularExpression) else { return 0 }
+        let digits = t[m].lowercased()
+            .replacingOccurrences(of: "gib", with: "")
+            .replacingOccurrences(of: "gb", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        return Double(digits) ?? 0
     }
 
     /// Real-Debrid sources sink below every other option (the service purged its cache and now
