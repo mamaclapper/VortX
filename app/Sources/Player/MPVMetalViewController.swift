@@ -26,9 +26,11 @@ final class MPVMetalViewController: UIViewController {
     lazy var queue = DispatchQueue(label: "mpv", qos: .userInitiated)
     
     var playUrl: URL?
+    var playUrlLive = false
     var onSingleTap: (() -> Void)?
     var hdrAvailable : Bool = false
     private let mpvLog = Logger(subsystem: "com.stremiox.app", category: "mpv")
+    private var configuredLiveMode = false
     /// The dynamic range currently applied to the output chain (mpv transfer curve,
     /// Metal layer colorspace, and on tvOS the display mode). Tracked so the sig-peak
     /// observer, which fires on every video reconfigure, only reapplies on change.
@@ -57,7 +59,7 @@ final class MPVMetalViewController: UIViewController {
         setupMpv()
         
         if let url = playUrl {
-            loadFile(url)
+            loadFile(url, live: playUrlLive)
         }
     }
     
@@ -305,7 +307,8 @@ final class MPVMetalViewController: UIViewController {
     }
 
     func loadFile(
-        _ url: URL
+        _ url: URL,
+        live: Bool = false
     ) {
         var args = [url.absoluteString]
         var options = [String]()
@@ -321,8 +324,11 @@ final class MPVMetalViewController: UIViewController {
         // direct CDN keeps the full buffer for network resilience. Set per file at runtime.
         let isLocalStream = url.host == "127.0.0.1" || url.host == "localhost"
             || (url.host?.hasSuffix("strem.io") ?? false)
+        configureLiveMode(live)
         let readAhead: String
-        if PerformanceMode.reduced {
+        if live {
+            readAhead = "64MiB"
+        } else if PerformanceMode.reduced {
             readAhead = isLocalStream ? "64MiB" : "256MiB"   // 2 GB Apple TV HD: keep buffers tight
         } else {
             readAhead = isLocalStream ? "128MiB" : "512MiB"
@@ -335,6 +341,27 @@ final class MPVMetalViewController: UIViewController {
 
         mpvLog.log("loadFile → \(url.absoluteString, privacy: .public)")
         command("loadfile", args: args)
+    }
+
+    private func configureLiveMode(_ live: Bool) {
+        guard configuredLiveMode != live else { return }
+        configuredLiveMode = live
+        if live {
+            mpv_set_property_string(mpv, "demuxer-readahead-secs", "18")
+            mpv_set_property_string(mpv, "demuxer-max-back-bytes", "8MiB")
+            mpv_set_property_string(mpv, "demuxer-lavf-o", "live_start_index=-3")
+            // The VOD/debrid reconnect settings are hostile to HLS live: normal
+            // playlist/segment EOFs trigger ffmpeg's exponential "reconnect at 0"
+            // delay (1s, 3s, 7s), which is exactly the recurring live stall.
+            mpv_set_property_string(mpv, "stream-lavf-o",
+                                    "reconnect=1,reconnect_streamed=0,reconnect_delay_max=1")
+        } else {
+            mpv_set_property_string(mpv, "demuxer-readahead-secs", "300")
+            mpv_set_property_string(mpv, "demuxer-max-back-bytes", "64MiB")
+            mpv_set_property_string(mpv, "demuxer-lavf-o", "")
+            mpv_set_property_string(mpv, "stream-lavf-o",
+                                    "reconnect=1,reconnect_streamed=1,reconnect_delay_max=7")
+        }
     }
     
     func togglePause() {

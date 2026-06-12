@@ -95,6 +95,7 @@ struct TVPlayerView: View {
     // it loads in the background so Next/auto-advance still work.
     @State private var loadedEpisodes: [CoreVideo] = []
     @State private var curIsTorrent = false             // current stream is a torrent (switches/auto-next update it)
+    @State private var curIsLive = false                // current stream is live HLS/IPTV (switches/auto-next update it)
     @State private var torrentStatus: String?           // live warm-up line ("Connecting to peers · 12 connected")
     @State private var torrentWarmupsUsed = 0           // bounded warm-up rounds before the error overlay
     @State private var playSpeed = 1.0                  // mpv playback speed (sticky for the session)
@@ -125,6 +126,7 @@ struct TVPlayerView: View {
 
             MPVMetalPlayerView(coordinator: coordinator)
                 .play(url)
+                .live(initialLiveMode)
                 .onPropertyChange { _, name, data in
                     switch name {
                     case MPVProperty.pausedForCache: if let b = data as? Bool { buffering = b }
@@ -179,6 +181,7 @@ struct TVPlayerView: View {
                         loadTimeout?.cancel()
                         if !hasStartedPlaying { handleLoadFailure((data as? String) ?? "") }
                     case MPVProperty.endFileEof:
+                        if handleLiveStreamEOF() { break }
                         if !markedWatched, let m = curMeta { markedWatched = true; core.markPlaybackWatched(m) }
                         autoAdvance()                                // episode finished → play next, else exit
                     default: break
@@ -197,7 +200,7 @@ struct TVPlayerView: View {
                         Text(torrentStatus)
                             .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
                     } else if reconnecting {
-                        Text("Reconnecting…  (\(autoRetryCount)/\(maxAutoRetries))")
+                        Text(isCurrentLiveStream ? "Reconnecting live stream…" : "Reconnecting…  (\(autoRetryCount)/\(maxAutoRetries))")
                             .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
                     } else if sourceHops > 0, !hasStartedPlaying {
                         Text("Source failed, trying another…  (\(sourceHops)/\(maxSourceHops))")
@@ -216,7 +219,7 @@ struct TVPlayerView: View {
             }
         }
         .onAppear {
-            if curURL == nil { curURL = url; curTitle = title; curMeta = meta; curIsTorrent = torrent }   // seed from initial
+            if curURL == nil { curURL = url; curTitle = title; curMeta = meta; curIsTorrent = torrent; curIsLive = initialLiveMode }   // seed from initial
             if curHint == nil { curHint = sourceHint }
             if curBinge == nil { curBinge = bingeGroup }
             startStallWatchdog()
@@ -764,6 +767,7 @@ struct TVPlayerView: View {
         if userInitiated { closePanel() }
         curURL = newURL
         curIsTorrent = stream.isTorrent
+        curIsLive = isLiveMeta(curMeta) && !stream.isTorrent
         curBinge = stream.behaviorHints?.bingeGroup
         sourceHops = 0; exhaustedURLs = []   // a deliberate pick resets the failover budget (failover restores it)
         torrentWarmupsUsed = 0; torrentStatus = nil; stallRecoveries = 0
@@ -772,7 +776,7 @@ struct TVPlayerView: View {
         appliedResume = false
         buffering = true; hasStartedPlaying = false; appliedAutoTracks = false; loadErrorMsg = ""
         autoRetryCount = 0; reconnecting = false; autoRetryTask?.cancel()
-        coordinator.player?.loadFile(newURL)
+        coordinator.player?.loadFile(newURL, live: curIsLive)
         startLoadTimeout()
     }
 
@@ -1016,7 +1020,7 @@ struct TVPlayerView: View {
         resumeSeconds = currentTime
         appliedResume = false; appliedAutoTracks = false
         buffering = true
-        coordinator.player?.loadFile(curURL ?? url)
+        coordinator.player?.loadFile(curURL ?? url, live: isCurrentLiveStream)
     }
 
     private func startLoadTimeout() {
@@ -1137,6 +1141,10 @@ struct TVPlayerView: View {
             warmUpTorrent()
             return
         }
+        if isCurrentLiveStream {
+            scheduleLiveStreamReconnect(reason: "load failure: \(msg)")
+            return
+        }
         guard autoRetryCount < maxAutoRetries else {
             reconnecting = false
             if hopToNextSource(reason: "load failed: \(msg)") { return }
@@ -1161,8 +1169,40 @@ struct TVPlayerView: View {
         autoRetryTask?.cancel()
         withAnimation { loadFailed = false }
         buffering = true; hasStartedPlaying = false; appliedResume = false; appliedAutoTracks = false; loadErrorMsg = ""
-        coordinator.player?.loadFile(curURL ?? url)
+        coordinator.player?.loadFile(curURL ?? url, live: isCurrentLiveStream)
         startLoadTimeout()
+    }
+
+    /// Live HLS providers sometimes surface a transient playlist reload failure as EOF
+    /// instead of an mpv error. For VOD EOF means "finished"; for live streams it means
+    /// reconnect to the playlist rather than marking watched and closing the player.
+    private func handleLiveStreamEOF() -> Bool {
+        guard isCurrentLiveStream else { return false }
+        scheduleLiveStreamReconnect(reason: "EOF")
+        return true
+    }
+
+    private func scheduleLiveStreamReconnect(reason: String) {
+        buffering = true
+        withAnimation { reconnecting = true }
+        plog.info("live stream \(reason, privacy: .public), reconnecting")
+        DiagnosticsLog.log("player", "live stream \(reason), reconnecting")
+        autoRetryTask?.cancel()
+        autoRetryTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.5))
+            guard !Task.isCancelled else { return }
+            retryLoad(resetAutoRetries: false)
+        }
+    }
+
+    private var isCurrentLiveStream: Bool { curIsLive && !isTorrentPlayback }
+    private var initialLiveMode: Bool { !torrent && isLiveMeta(meta) }
+
+    /// Treat non-library ids (for example live sports ids) as live. Normal
+    /// scrobbleable/catalog ids keep the VOD buffering behavior.
+    private func isLiveMeta(_ meta: PlaybackMeta?) -> Bool {
+        guard let id = meta?.libraryId else { return false }
+        return !SkipTimestampService.supports(metaId: id)
     }
 
     // MARK: - Skip intro / outro (chapter-derived; AniSkip crowd-sourced timings can feed the same model later)
@@ -1189,6 +1229,13 @@ struct TVPlayerView: View {
     /// pill simply appears once the result lands, normally well before the intro is reached.
     private func fetchSkipTimestamps() {
         guard let m = curMeta else { plog.info("skip: no curMeta, not fetching"); return }
+        guard SkipTimestampService.supports(metaId: m.libraryId) else {
+            skipFetchTask?.cancel()
+            apiSkipCandidates = []
+            skipFetchKey = ""
+            refreshSkipSegments()
+            return
+        }
         let key = "\(m.libraryId):\(m.season ?? 0):\(m.episode ?? 0)"
         if key != skipFetchKey { apiSkipCandidates = [] }   // drop spans from the previous episode
         skipFetchKey = key
@@ -1277,6 +1324,7 @@ struct TVPlayerView: View {
             curHint = pre.signature
             curBinge = pre.bingeGroup
             curIsTorrent = pre.stream.isTorrent
+            curIsLive = isLiveMeta(newMeta) && !pre.stream.isTorrent
             torrentWarmupsUsed = 0; torrentStatus = nil
             stallRecoveries = 0
             plog.info("episode switch: playing preloaded best source")
@@ -1285,7 +1333,7 @@ struct TVPlayerView: View {
             Task {
                 core.loadMeta(type: "series", id: m.libraryId, streamType: "series", streamId: v.id)
                 resumeSeconds = await account.resumeOffset(for: newMeta)
-                coordinator.player?.loadFile(u)
+                coordinator.player?.loadFile(u, live: curIsLive)
                 startLoadTimeout()
                 // Hand the stream to the engine Player once its meta_details catches up, so
                 // Continue Watching keeps tracking; harmless if it never matches.
@@ -1321,8 +1369,9 @@ struct TVPlayerView: View {
                     core.loadEnginePlayer(for: s)
                     prepareTorrent(s)                                  // no-op for direct / debrid URLs
                     curURL = u
+                    curIsLive = isLiveMeta(newMeta) && !s.isTorrent
                     resumeSeconds = await account.resumeOffset(for: newMeta)
-                    coordinator.player?.loadFile(u)
+                    coordinator.player?.loadFile(u, live: curIsLive)
                     startLoadTimeout()
                     return
                 }
