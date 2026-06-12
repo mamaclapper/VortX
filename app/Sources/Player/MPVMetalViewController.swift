@@ -154,9 +154,9 @@ final class MPVMetalViewController: UIViewController {
         checkError(mpv_set_option(mpv, "wid", MPV_FORMAT_INT64, &metalLayer))
         checkError(mpv_set_option_string(mpv, "subs-match-os-language", "yes"))
         checkError(mpv_set_option_string(mpv, "subs-fallback", "yes"))
-        // Point libass at the bundled fonts for non-Latin subtitle rendering.
-        // Full build: fonts live in a "fonts" subfolder (folder reference).
-        // Lite build: fonts are at the bundle root (individual resources, no CJK to save ~14 MB).
+        // Point libass at the bundled fonts for non-Latin subtitle rendering. Every target ships
+        // the same set in a "fonts" folder reference today; the bundle-root fallback stays in
+        // case a build ever lays the optional font resources out flat.
         if let res = Bundle.main.resourcePath {
             let fontsSubdir = res + "/fonts"
             let fontsDir = FileManager.default.fileExists(atPath: fontsSubdir) ? fontsSubdir : res

@@ -49,16 +49,18 @@ enum SubtitleStyle {
     static var colorHex: String { (colors.first { $0.id == current(Key.color, defaultColor) } ?? colors[0]).hex }
     static var backgroundId: String { current(Key.background, defaultBackground) }
 
-    /// The mpv face name for the chosen style. Classic prefers the bundled CJK Noto, but the Lite
-    /// build ships without it (the ~14 MB font is Full-only), so Classic degrades to plain Noto
-    /// Sans there; CJK glyphs still render through `subs-fallback`.
+    /// The mpv face name for the chosen style. Classic prefers the bundled CJK Noto; if a build
+    /// ever ships without it (fonts are an optional resource), Classic degrades to plain Noto
+    /// Sans instead of naming a missing face.
     static var mpvFontName: String {
         if fontId == "modern" { return "Helvetica Neue" }
         return cjkFontBundled ? "Noto Sans CJK KR" : "Noto Sans"
     }
 
-    /// Whether the big CJK Noto ships in this build. Full bundles fonts in a "fonts" folder
-    /// reference; Lite copies the small fonts to the bundle root and drops the CJK one.
+    /// Whether the CJK Noto made it into this bundle. Every build ships it today (the trimmed
+    /// face is ~6.5 MB compressed; without it CJK subtitles are tofu, since libass's CoreText
+    /// fallback does not cover CJK here), but the fonts folder is an optional resource, so
+    /// check rather than assume. Both layouts are probed: "fonts" folder and bundle root.
     static var cjkFontBundled: Bool {
         guard let res = Bundle.main.resourcePath else { return false }
         return FileManager.default.fileExists(atPath: res + "/fonts/NotoSansCJK.otf")

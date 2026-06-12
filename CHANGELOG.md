@@ -21,7 +21,7 @@ What is planned next is in [ROADMAP.md](ROADMAP.md). To request a feature or rep
 - Browse backdrops restored on all hardware. The moving artwork on the Home and catalog pages is no longer suppressed on the Apple TV HD; only the player-side buffers and animation rate remain lighter on that model.
 
 ### Changed
-- The CJK subtitle font is trimmed to its practically-used coverage: 7.6 MB instead of 16 MB, with identical rendering for real-world subtitles. Every build gets smaller; the Lite build drops the CJK face entirely and saves the most.
+- The CJK subtitle font is trimmed to its practically-used coverage: 7.6 MB instead of 16 MB, with identical rendering for real-world subtitles. Every build gets smaller, and every build keeps full CJK subtitle support.
 - Vendor downloads in the build script are now checksum-pinned, so a tampered or corrupted dependency fails the build instead of shipping.
 
 ## 0.2.44 - 2026-06-11
