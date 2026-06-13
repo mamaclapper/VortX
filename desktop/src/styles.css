@@ -112,3 +112,110 @@ body {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* Overlays: detail (meta + streams) and the player. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: var(--bg);
+  overflow-y: auto;
+}
+.overlay.hidden {
+  display: none;
+}
+.player-overlay {
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.back {
+  position: fixed;
+  top: 1rem;
+  left: 1rem;
+  z-index: 12;
+  border: none;
+  border-radius: 999px;
+  padding: 0.5rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  background: rgba(22, 18, 31, 0.85);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+}
+.back:hover {
+  background: var(--surface-2);
+}
+
+.detail-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center top;
+  opacity: 0.5;
+}
+.detail-body {
+  position: relative;
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: 30vh 2rem 3rem;
+}
+.detail-body h1 {
+  font-size: clamp(2rem, 1rem + 3vw, 3.25rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.meta-sub {
+  color: var(--accent);
+  font-weight: 600;
+  margin-top: 0.35rem;
+}
+.desc {
+  color: var(--text);
+  line-height: 1.6;
+  margin-top: 1rem;
+  max-width: 42rem;
+}
+.detail-body h3 {
+  margin-top: 2rem;
+  font-size: 1.1rem;
+}
+.streams {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.stream {
+  text-align: left;
+  border: none;
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-2);
+  cursor: pointer;
+  transition: transform 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.stream:hover {
+  transform: translateX(4px);
+  color: var(--accent);
+}
+.muted {
+  color: var(--muted);
+  margin-top: 0.5rem;
+  line-height: 1.5;
+}
+.detail-loading {
+  padding: 40vh 2rem;
+  text-align: center;
+  color: var(--muted);
+}
+.video {
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
