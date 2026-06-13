@@ -1,5 +1,10 @@
 import Foundation
+import QuartzCore
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 class MetalLayer: CAMetalLayer {
 
@@ -20,7 +25,7 @@ class MetalLayer: CAMetalLayer {
     // HDRDisplayMode (an AVDisplayManager HDMI display-mode switch) plus the
     // PQ/HLG colorspace tag applied in MPVMetalViewController.
     // The setter must run on the main thread to activate screen EDR mode.
-    #if os(iOS)
+    #if os(iOS) || os(macOS)
     override var wantsExtendedDynamicRangeContent: Bool  {
         get {
             return super.wantsExtendedDynamicRangeContent
