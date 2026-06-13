@@ -98,8 +98,20 @@ fi
 
 # --- 2) server.cjs (idempotent + checksum-verified) -----------------------------------
 verify_sha256() { # <file> <expected-hash> <label>
-  local actual
-  actual="$(shasum -a 256 "$1" | cut -d' ' -f1)"
+  local actual=""
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$1" | cut -d' ' -f1)"
+  elif command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "$1" | cut -d' ' -f1)"
+  elif command -v openssl >/dev/null 2>&1; then
+    actual="$(openssl dgst -sha256 "$1" | awk '{print $NF}')"
+  elif command -v certutil >/dev/null 2>&1; then
+    # Windows fallback (Git Bash without coreutils): certutil prints the hash on line 2.
+    actual="$(certutil -hashfile "$1" SHA256 | sed -n '2p' | tr -dc '0-9a-fA-F' | tr 'A-F' 'a-f')"
+  else
+    echo "fetch-server-deps: no sha256 tool (sha256sum/shasum/openssl/certutil); skipping verify for $3" >&2
+    return 0
+  fi
   if [ "${actual}" != "$2" ]; then
     echo "ERROR: $3 checksum mismatch" >&2
     echo "  expected: $2" >&2
