@@ -1,5 +1,9 @@
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
 private func themeRGB(_ r: Double, _ g: Double, _ b: Double) -> Color {
     Color(.sRGB, red: r, green: g, blue: b, opacity: 1)
@@ -78,9 +82,16 @@ final class ThemeManager: ObservableObject {
     /// vivid accents tint gently and Mono stays near-neutral.
     private func tintedDark(_ brightness: Double) -> Color {
         var h: CGFloat = 0, s: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        #if canImport(UIKit)
         guard UIColor(accent).getHue(&h, saturation: &s, brightness: &b, alpha: &a) else {
             return themeRGB(brightness, brightness, brightness)
         }
+        #else
+        guard let rgb = NSColor(accent).usingColorSpace(.sRGB) else {
+            return themeRGB(brightness, brightness, brightness)
+        }
+        rgb.getHue(&h, saturation: &s, brightness: &b, alpha: &a)
+        #endif
         return Color(hue: Double(h), saturation: min(Double(s) * 0.5, 0.34), brightness: brightness)
     }
 }
