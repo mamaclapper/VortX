@@ -47,7 +47,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Node 22 (current LTS). Node 20 is EOL (April 2026), and vite 8 requires
+          # ^20.19.0 || >=22.12.0, so 22 is the clean floor.
+          node-version: "22"
           cache: npm
           cache-dependency-path: desktop/package-lock.json
 
