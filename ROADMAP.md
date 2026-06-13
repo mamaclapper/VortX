@@ -11,7 +11,7 @@ Feature requests and bug reports are welcome, and they shape this list. Start a 
 ## The version path
 
 - **0.2.x (shipped).** Skip intro and outro, the cinematic redesign, the living backdrop, ranked Watch Now with the two-level quality picker, instant preloaded auto-play next, and profiles.
-- **0.3.0 (in progress).** The native iPhone and iPad app on the same engine and player as the Apple TV app, replacing the web-host build. Profiles ride along on both platforms.
+- **0.3.0 (in progress).** Native iPhone, iPad, and Mac apps on the same engine and player as the Apple TV app, at full parity: the cinematic detail page, ranked sources with the quality picker, full settings and profiles, an interactive auto-rotating hero, trailers on every device, and torrents on the Mac (it now bundles the streaming server). Desktop (Windows, Linux, and Mac via Tauri) and Android are in active development on the shared engine. This replaces the web-host iPhone and iPad build with native everywhere.
 - **0.4.0, stream intelligence.** A trust filter that drops cam rips, dead links, and fake quality labels, with fresh-release gating; keyword include and exclude filters; debrid built in (RealDebrid, AllDebrid, Premiumize, TorBox keys configured in-app, no separate configuration site); auto-play that sticks to the same release group across episodes so quality never jumps mid-season; a dual-layer Dolby Vision to HDR10 fallback so 4K remuxes play instead of failing; frame-rate matching.
 - **0.5.0, the player, finished.** Seek-preview thumbnails on the scrubber; dual subtitle tracks; image-based (PGS) subtitles; anime skip coverage through a second timestamp database; an auto-skip option with a cancel countdown; contributing skip timestamps back from the player; cross-device playback sync so you can pause on the TV and pick up on the iPad; sleep timer; picture-in-picture on iPhone and iPad.
 - **0.6.0, discovery and metadata.** Our own metadata enrichment (multi-source ratings, cast and crew with photos, studio badges, trailers); advanced search with real filters; poster rating overlays; HD logos and art; a release calendar and a "this week" rail; catalog management (move, hide, rename, merge into groups); pick which metadata add-on drives the home screen so one provider's outage never takes the app down.
@@ -28,7 +28,7 @@ The bigger pieces, each its own chunk of work:
 - **1.2, live TV done properly.** A real channel guide (EPG), catch-up and timeshift, recording, multiview, and in-guide previews.
 - **1.3, beyond video.** Music, podcasts, and audiobooks in the same app; first-class anime tracking with season merging and a release feed; watch-together with synced playback and chat on a relay you can host yourself.
 - **1.x niceties.** Casting beyond AirPlay (Chromecast, DLNA, Roku); shader upscaling and tone-mapping for SDR screens; audio and color profiles; Discord presence; a built-in ad and tracker blocker; a taste-scored discovery feed.
-- **2.0, everywhere.** Mac, Apple Vision, and Android, on the shared core.
+- **2.0, everywhere.** Apple Vision and the remaining platforms on the shared core, building on the native Mac, desktop, and Android foundations laid in 0.3.0.
 
 ## Shipped
 
