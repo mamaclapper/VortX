@@ -499,6 +499,12 @@ final class CoreBridge: ObservableObject {
     /// Resume position (seconds) from the engine's library item for `meta`, or nil if the engine has
     /// no entry (the caller then falls back to the account). For a series, only resume when the saved
     /// video matches the episode being opened. (timeOffset is stored in ms.)
+    ///
+    /// IMPORTANT: the series-mismatch branch returns 0, NOT nil, on purpose. For an engine-history
+    /// profile the engine IS the source of truth: it knows this title but the saved offset is for a
+    /// different episode, so the right answer is "start this episode at 0", and returning 0 (a real
+    /// value) deliberately suppresses the account fallback. Do not "simplify" this to nil, or the
+    /// caller would then resume the account's offset and play the wrong episode position.
     func engineResumeSeconds(for meta: PlaybackMeta) -> Double? {
         guard let item = metaDetails?.libraryItem else { return nil }
         if meta.type == "series", let videoId = item.state.videoId, videoId != meta.videoId { return 0 }

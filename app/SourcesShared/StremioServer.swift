@@ -51,7 +51,12 @@ enum StremioServer {
         func enc(_ s: String) -> String { s.addingPercentEncoding(withAllowedCharacters: allowed) ?? s }
 
         var qs = "d=\(enc(origin))"
-        for (name, value) in headers { qs += "&h=\(enc("\(name):\(value)"))" }
+        // The server splits each h= on its FIRST colon into Name:Value, so a value may contain ':'
+        // (it survives, e.g. a URL value) but a NAME with a colon would mis-split. Skip malformed
+        // names defensively; a valid HTTP header name never contains a colon anyway.
+        for (name, value) in headers where !name.isEmpty && !name.contains(":") {
+            qs += "&h=\(enc("\(name):\(value)"))"
+        }
 
         let path = streamURL.path.isEmpty ? "/" : streamURL.path
         let search = streamURL.query.map { "?\($0)" } ?? ""

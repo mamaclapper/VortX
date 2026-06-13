@@ -47,6 +47,11 @@ struct UserProfile: Codable, Identifiable, Equatable {
     /// Salted hash for a PIN, stored instead of the raw digits so a PIN can be
     /// changed but never read back. The salt is the profile id, which is stable
     /// across devices, so hashed PINs survive roster sync.
+    ///
+    /// NOTE: this is a parental gate, NOT a security boundary. The salt (the profile id) travels in
+    /// the synced roster payload, so it is not secret; the hash only stops trivial plaintext
+    /// readback, not an attacker who can read the roster. Do not rely on it to protect anything
+    /// sensitive. The legacy plaintext path in pinMatches is migration-only.
     static func pinHash(_ raw: String, profileID: UUID) -> String {
         let digest = SHA256.hash(data: Data("\(profileID.uuidString):\(raw)".utf8))
         return "sha256:" + digest.map { String(format: "%02x", $0) }.joined()

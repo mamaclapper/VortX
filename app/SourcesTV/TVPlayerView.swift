@@ -77,6 +77,13 @@ struct TVPlayerView: View {
     @State private var exhaustedURLs: Set<URL> = []    // sources already given up on for this video
     @State private var sourceHops = 0                  // automatic source switches so far for this video
     private let maxSourceHops = 4                      // a fully-dead title still errors out, just later
+    // Overall wall-clock cap on PRE-START recovery. The per-budget counters (30s load timeout x
+    // retries, 2 torrent warm-ups, 4 source hops, stall reloads) are independent, so on a fully
+    // dead title they could chain into minutes of spinner before the error overlay. This single
+    // deadline spans the whole attempt (started once on the first load, persists across hops) and
+    // gives up after maxRecoverySeconds regardless of which budget is live.
+    @State private var recoveryDeadline: Task<Void, Never>?
+    private let maxRecoverySeconds: Double = 150
     @State private var skipSegments: [SkipSegment] = []   // resolved skip spans (chapters + crowd timestamps)
     @State private var apiSkipCandidates: [SegmentCandidate] = []   // crowd-sourced spans for the current title
     @State private var skipFetchKey = ""                   // imdb:S:E the crowd spans belong to
@@ -148,7 +155,7 @@ struct TVPlayerView: View {
                     case MPVProperty.timePos:
                         if let d = data as? Double {
                             if d > 0, !hasStartedPlaying {            // playback actually began
-                                hasStartedPlaying = true; loadTimeout?.cancel(); loadFailed = false
+                                hasStartedPlaying = true; loadTimeout?.cancel(); recoveryDeadline?.cancel(); recoveryDeadline = nil; loadFailed = false
                                 autoRetryCount = 0; reconnecting = false; autoRetryTask?.cancel()   // playback started: clear auto-recovery
                                 if let m = curMeta, let u = curURL {   // remember the working link for direct resume
                                     LastStreamStore.record(libraryId: m.libraryId, entry: .init(
@@ -267,7 +274,7 @@ struct TVPlayerView: View {
             }
         }
         .onDisappear {
-            hideTask?.cancel(); loadTimeout?.cancel(); autoRetryTask?.cancel(); skipFetchTask?.cancel(); stallWatchdog?.cancel()
+            hideTask?.cancel(); loadTimeout?.cancel(); recoveryDeadline?.cancel(); autoRetryTask?.cancel(); skipFetchTask?.cancel(); stallWatchdog?.cancel()
             saveProgress(at: currentTime)
             core.reportProgress(timeSeconds: currentTime, durationSeconds: duration)   // flush final position to the engine
             if let hash = currentTorrentHash { closeTorrent(hash: hash) }   // free the engine when the player closes
@@ -825,6 +832,7 @@ struct TVPlayerView: View {
         curBinge = stream.behaviorHints?.bingeGroup
         curHeaders = stream.requestHeaders
         sourceHops = 0; exhaustedURLs = []   // a deliberate pick resets the failover budget (failover restores it)
+        recoveryDeadline?.cancel(); recoveryDeadline = nil   // fresh attempt re-arms the overall recovery cap
         torrentWarmupsUsed = 0; torrentStatus = nil; stallRecoveries = 0
         prepareTorrent(stream)   // mid-playback switches never announced the torrent before
         resumeSeconds = currentTime
@@ -1101,6 +1109,7 @@ struct TVPlayerView: View {
 
     private func startLoadTimeout() {
         loadTimeout?.cancel()
+        startRecoveryDeadline()   // first call arms the overall cap; later calls (hops) leave it running
         loadTimeout = Task { @MainActor in
             try? await Task.sleep(for: .seconds(30))
             guard !hasStartedPlaying else { return }
@@ -1110,6 +1119,21 @@ struct TVPlayerView: View {
             }
             if hopToNextSource(reason: "load timeout") { return }
             if loadErrorMsg.isEmpty { loadErrorMsg = "Timed out, the source never started." }
+            withAnimation { loadFailed = true }
+        }
+    }
+
+    /// Arm the overall pre-start recovery cap once per attempt. Idempotent: a hop calls
+    /// startLoadTimeout again, but the deadline keeps running so the whole sequence is bounded.
+    /// Reset (cancelled to nil) on a deliberate fresh pick and on playback actually starting.
+    private func startRecoveryDeadline() {
+        guard recoveryDeadline == nil else { return }
+        recoveryDeadline = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(maxRecoverySeconds))
+            guard !Task.isCancelled, !hasStartedPlaying, !loadFailed else { return }
+            DiagnosticsLog.log("player", "recovery deadline \(Int(maxRecoverySeconds))s reached after \(sourceHops) hops, giving up")
+            loadTimeout?.cancel(); autoRetryTask?.cancel(); stallWatchdog?.cancel()
+            if loadErrorMsg.isEmpty { loadErrorMsg = "Couldn't start playback after trying several sources." }
             withAnimation { loadFailed = true }
         }
     }
@@ -1416,6 +1440,7 @@ struct TVPlayerView: View {
         buffering = true; hasStartedPlaying = false; appliedResume = false
         loadFailed = false; currentTime = 0; duration = 0; lastSaved = -1; resumeSeconds = nil; appliedAutoTracks = false
         sourceHops = 0; exhaustedURLs = []   // fresh episode, fresh failover budget
+        recoveryDeadline?.cancel(); recoveryDeadline = nil   // fresh attempt re-arms the overall recovery cap
         let newMeta = PlaybackMeta(libraryId: m.libraryId, videoId: v.id, type: "series",
                                    name: m.name, poster: m.poster, season: v.season, episode: v.episode)
         curMeta = newMeta

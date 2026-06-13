@@ -106,7 +106,11 @@ enum StreamRanking {
         cacheLock.unlock()
         let value = computeScore(s)
         cacheLock.lock()
-        if scoreCache.count > 4096 { scoreCache.removeAll() }   // runaway guard, never hit in practice
+        // Cap above the largest realistic source list (popular titles return a few thousand
+        // streams across add-ons). At 4096 a single big title thrashed the cache mid-render
+        // (clear, refill, clear) and lost the memoization it exists for; 32768 clears that while
+        // still bounding a runaway.
+        if scoreCache.count > 32_768 { scoreCache.removeAll() }
         scoreCache[key] = value
         cacheLock.unlock()
         return value
@@ -247,13 +251,26 @@ enum StreamRanking {
     static func languageScore(_ text: String) -> Int {
         let preferred = Set(TrackPreferences.current.audioLanguages)
         guard !preferred.isEmpty else { return 0 }
-        // Carries the viewer's selected language: rank normally.
+        // Carries the viewer's selected language (anywhere): rank normally.
         if preferred.contains(where: { claimsLanguage(text, $0) }) { return 0 }
         // Multi-language release: never demote (it likely carries or can select the viewer's track).
         if isMultiLanguage(text) { return 0 }
         // Single, clearly-foreign release: demote so the viewer's language wins over resolution.
+        // Only match the foreign token in the TECHNICAL-TAGS portion (after the year/resolution), not
+        // the title, so a foreign word in an English title is not mistaken for foreign audio
+        // ("The French Dispatch" / "The Italian Job" are English). Conservative: if no year or
+        // resolution marker is present, the whole text is treated as tags (current behaviour).
+        let tags = technicalTags(text)
         let foreign = langTokens.keys.filter { !preferred.contains($0) }
-        return foreign.contains(where: { claimsLanguage(text, $0) }) ? -5000 : 0
+        return foreign.contains(where: { claimsLanguage(tags, $0) }) ? -5000 : 0
+    }
+
+    /// The technical-tags substring (from the first year or resolution marker onward), where audio
+    /// language tags live. The title precedes it; a language WORD in the title is not an audio claim.
+    private static func technicalTags(_ text: String) -> String {
+        guard let marker = firstMatch(text, #"(?:19|20)\d{2}|2160p?|1080p?|720p?|480p?"#),
+              let r = text.range(of: marker) else { return text }
+        return String(text[r.lowerBound...])
     }
 
     /// True when `text` advertises audio language `code` (full words by substring, short codes and
@@ -347,6 +364,12 @@ enum StreamRanking {
             return .debrid
         }
         if s.isTorrent { return .torrent }
+        // A non-torrent stream that advertises a cache marker is a resolved/cached link from a
+        // debrid-like service whose name/tag we didn't recognise above. Rank it debrid-equivalent
+        // rather than DIRECT (tier weight 0, below raw torrents), the exact "played a torrent over
+        // my cached debrid" failure when a new add-on uses a tag form not in the grammar. Plain
+        // direct HTTP streams from add-ons do not carry cache markers, so this won't catch them.
+        if isCached(s, text) { return .debrid }
         return .direct
     }
 
