@@ -15,7 +15,14 @@ struct DetailView: View {
     var body: some View {
         Group {
             if let meta = core.metaDetails?.meta {
-                if type == "series", let videos = meta.videos, !videos.isEmpty {
+                // Live (tv / channel / events) gets its own stripped-down page BEFORE the movie
+                // fallback (today live falls through to moviePage): backdrop + name + a red LIVE
+                // badge + the channel source list, with NO VOD chrome — no trailer chip, no movie
+                // synopsis framing, no skip/chapter UI. The source list keeps PlaybackMeta(type: type)
+                // so the player's live-tuned path engages (see TVPlayerView.initialLiveMode).
+                if LiveTypes.contains(type) {
+                    livePage(meta)
+                } else if type == "series", let videos = meta.videos, !videos.isEmpty {
                     seriesPage(meta, videos: videos)
                 } else {
                     moviePage(meta)
@@ -104,6 +111,50 @@ struct DetailView: View {
                 .padding(.bottom, Theme.Space.xl)
             }
         }
+    }
+
+    /// Live channel page: the same full-bleed cinematic backdrop as a movie, but stripped of VOD chrome —
+    /// no trailer chip, no movie-style synopsis paragraph, no skip/chapter UI. A red "LIVE" badge sits
+    /// beside the title, and the channel's full source list lets the user pick a stream. The stream list
+    /// carries the channel's live `type` in its `PlaybackMeta`, which the player reads via `LiveTypes` to
+    /// engage live tuning and NO-OP resume/progress.
+    private func livePage(_ m: CoreMetaItem) -> some View {
+        ZStack {
+            FullBleedBackdrop(url: m.background ?? m.poster)
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Space.lg) {
+                    Spacer().frame(height: 380)
+                    VStack(alignment: .leading, spacing: Theme.Space.sm) {
+                        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.md) {
+                            Text(m.name)
+                                .font(Theme.Typography.hero).tracking(-1.5)
+                                .foregroundStyle(Theme.Palette.textPrimary)
+                                .lineLimit(2).minimumScaleFactor(0.6)
+                                .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
+                            liveBadge
+                        }
+                        metaRow(m)
+                    }
+                    CoreStreamList(title: m.name,
+                                   meta: PlaybackMeta(libraryId: m.id, videoId: m.id, type: type,
+                                                      name: m.name, poster: m.poster,
+                                                      season: nil, episode: nil))
+                }
+                .padding(.horizontal, Theme.Space.screenEdge)
+                .padding(.bottom, Theme.Space.xl)
+            }
+        }
+    }
+
+    /// The red "LIVE" pill that marks a live channel (the live counterpart to the VOD trailer / Watch
+    /// affordances this page drops).
+    private var liveBadge: some View {
+        Text("LIVE")
+            .font(Theme.Typography.eyebrow).tracking(1.5)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(Theme.Palette.danger, in: Capsule())
+            .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
     }
 
     /// Full-bleed backdrop with a canvas-blended gradient and the title / metadata / synopsis on the
