@@ -1,0 +1,48 @@
+name: Build Android APK
+
+# CI-first Android build. Android cannot be built on the macOS dev machine (no SDK/JDK), so this
+# workflow is the build feedback loop: it builds the debug APK and uploads it as an artifact.
+# The shared engine (stremio-core-kotlin), the libmpv player, and the Compose UI matching tvOS/iOS
+# are added incrementally on top of this verified skeleton.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        working-directory: android
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StremioX-Android-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn

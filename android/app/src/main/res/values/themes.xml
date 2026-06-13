@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Minimal framework theme to host Compose; no AppCompat/Material-Components dependency. -->
+    <style name="Theme.StremioX" parent="@android:style/Theme.Material.NoActionBar" />
+</resources>
