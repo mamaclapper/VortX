@@ -8,6 +8,7 @@ struct iOSSettingsView: View {
     @EnvironmentObject private var core: CoreBridge
     @EnvironmentObject private var theme: ThemeManager
     @AppStorage(SubtitleStyle.Key.size) private var subSize = SubtitleStyle.defaultSize
+    @AppStorage(AudioOutputMode.key) private var audioOutput = AudioOutputMode.auto.rawValue
     @State private var showSignIn = false
 
     var body: some View {
@@ -25,6 +26,15 @@ struct iOSSettingsView: View {
                     Stepper(value: $theme.textScale, in: ThemeManager.textScaleRange, step: ThemeManager.textScaleStep) {
                         Text("App text size  ·  \(Int((theme.textScale * 100).rounded()))%")
                     }
+                }
+                Section {
+                    Picker("Audio output", selection: $audioOutput) {
+                        ForEach(AudioOutputMode.allCases, id: \.rawValue) { Text($0.label).tag($0.rawValue) }
+                    }
+                } header: {
+                    Text("Audio")
+                } footer: {
+                    Text(AudioOutputMode(rawValue: audioOutput)?.detail ?? "")
                 }
                 Section("Subtitles") {
                     Picker("Size", selection: $subSize) {

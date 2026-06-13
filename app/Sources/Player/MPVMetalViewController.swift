@@ -129,10 +129,27 @@ final class MPVMetalViewController: UIViewController {
     /// multichannel PCM, preserving the 0.2.43 eARC fix.
     private var outputChannels = 2
 
+    /// The mpv `audio-channels` policy for the current AudioOutputMode and route. Stereo forces a
+    /// 2.0 downmix every endpoint can play; Surround forces the full layout for an under-reporting
+    /// receiver; Auto downmixes a stereo route but keeps native multichannel for a real receiver.
+    private var channelPolicy: String {
+        switch AudioOutputMode.current {
+        case .stereo: return "stereo"
+        case .surround: return "auto"
+        case .auto: return outputChannels > 2 ? "auto-safe" : "stereo"
+        }
+    }
+
     private func configureAudioSession() {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .moviePlayback, options: [])
+            // Stereo mode also drops .moviePlayback: that mode's long-form/multichannel behaviour
+            // can make the audiounit AO advertise a layout a 2.x ARC soundbar cannot render, which
+            // is the most likely cause of the "no sound through my soundbar, fine on the TV"
+            // reports. .default under .playback is the most compatible path. Auto and Surround keep
+            // .moviePlayback for the eARC receiver case (the 0.2.43 fix for issue #20).
+            let mode: AVAudioSession.Mode = AudioOutputMode.current == .stereo ? .default : .moviePlayback
+            try session.setCategory(.playback, mode: mode, options: [])
             try session.setActive(true)
             outputChannels = max(session.maximumOutputNumberOfChannels, 2)
         } catch {
@@ -243,14 +260,14 @@ final class MPVMetalViewController: UIViewController {
         // can advertise multichannel yet deliver nothing. So: gate on the route's real output
         // channel count (captured in configureAudioSession after the session went active). A true
         // receiver advertising >2 keeps native multichannel PCM, preserving the 0.2.43 eARC fix;
-        // anything <=2 is forced to a stereo DOWNMIX so the endpoint always gets sound.
-        let channelPolicy = outputChannels > 2 ? "auto-safe" : "stereo"
+        // anything <=2 is forced to a stereo DOWNMIX so the endpoint always gets sound. The viewer
+        // can override the whole policy with the Audio Output setting (Auto / Stereo / Surround).
         checkError(mpv_set_option_string(mpv, "audio-channels", channelPolicy))
         // Never let an AO-open failure fall through to the null AO: that is silent death with no
         // log. With this off, a failure surfaces as MPV_EVENT_LOG_MESSAGE (captured in DEBUG) so
         // the next silent-audio report is actually diagnosable instead of a guess.
         checkError(mpv_set_option_string(mpv, "audio-fallback-to-null", "no"))
-        mpvLog.log("audio-channels = \(channelPolicy, privacy: .public) (route reports \(self.outputChannels) ch)")
+        mpvLog.log("audio-channels = \(self.channelPolicy, privacy: .public) (route reports \(self.outputChannels) ch)")
 
         checkError(mpv_initialize(mpv))
         
@@ -309,9 +326,8 @@ final class MPVMetalViewController: UIViewController {
     private func applyChannelPolicy() {
         guard mpv != nil else { return }
         outputChannels = max(AVAudioSession.sharedInstance().maximumOutputNumberOfChannels, 2)
-        let channelPolicy = outputChannels > 2 ? "auto-safe" : "stereo"
         setString("audio-channels", channelPolicy)
-        mpvLog.log("audio-channels reapplied = \(channelPolicy, privacy: .public) (route reports \(self.outputChannels) ch)")
+        mpvLog.log("audio-channels reapplied = \(self.channelPolicy, privacy: .public) (mode \(AudioOutputMode.current.rawValue, privacy: .public), route \(self.outputChannels) ch)")
     }
 
     @objc private func audioRouteChanged(_ note: Notification) {

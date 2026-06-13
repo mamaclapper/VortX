@@ -237,21 +237,48 @@ enum StreamRanking {
         "ru": ["russian", "русск"],
     ]
 
-    /// A release that explicitly claims a non-preferred audio language (and no preferred one)
-    /// is demoted so the viewer's language wins over a higher resolution. "multi"/"dual"/"multi
-    /// audio" count as carrying the preferred track, so they are never penalised.
+    /// Demote ONLY a release that clearly advertises a single foreign audio language (and not the
+    /// viewer's). Priority is the viewer's SELECTED audio language, not English; a release carrying
+    /// that language, or any multi-language release, is never demoted. So a 4K that is ONLY Chinese
+    /// loses to a 1080p in the viewer's language, but a multi-language 4K (which almost always
+    /// carries or can select the viewer's track) keeps its resolution rank. The earlier version
+    /// only exempted the literal words "multi"/"dual", so a release tagging several real languages
+    /// it could not perfectly match was wrongly sunk below a single-language lower resolution.
     static func languageScore(_ text: String) -> Int {
         let preferred = Set(TrackPreferences.current.audioLanguages)
         guard !preferred.isEmpty else { return 0 }
-        if text.contains("multi") || text.contains("dual") { return 0 }
-        func claims(_ code: String) -> Bool {
-            (langTokens[code] ?? []).contains { token in
-                token.count <= 3 ? boundedMatch(text, token) : text.contains(token)
-            }
-        }
-        if preferred.contains(where: claims) { return 0 }   // carries a preferred language
+        // Carries the viewer's selected language: rank normally.
+        if preferred.contains(where: { claimsLanguage(text, $0) }) { return 0 }
+        // Multi-language release: never demote (it likely carries or can select the viewer's track).
+        if isMultiLanguage(text) { return 0 }
+        // Single, clearly-foreign release: demote so the viewer's language wins over resolution.
         let foreign = langTokens.keys.filter { !preferred.contains($0) }
-        return foreign.contains(where: claims) ? -5000 : 0
+        return foreign.contains(where: { claimsLanguage(text, $0) }) ? -5000 : 0
+    }
+
+    /// True when `text` advertises audio language `code` (full words by substring, short codes and
+    /// CJK glyphs boundary-checked).
+    private static func claimsLanguage(_ text: String, _ code: String) -> Bool {
+        (langTokens[code] ?? []).contains { token in
+            token.count <= 3 ? boundedMatch(text, token) : text.contains(token)
+        }
+    }
+
+    /// True when a release advertises more than one audio language, so demoting it for "not being
+    /// in your language" would be wrong. Catches the explicit markers (multi, multilang,
+    /// multi-audio, dual, dual audio), any release tagging two or more distinct languages, and any
+    /// release carrying two or more country flags (a common multi-audio convention).
+    static func isMultiLanguage(_ text: String) -> Bool {
+        if text.contains("multi") || text.contains("dual") { return true }
+        if langTokens.keys.filter({ claimsLanguage(text, $0) }).count >= 2 { return true }
+        return flagCount(text) >= 2
+    }
+
+    /// Number of country-flag emoji in `text`. A flag is a pair of Unicode regional-indicator
+    /// scalars (U+1F1E6 to U+1F1FF), so the scalar count over two is the flag count, regardless of
+    /// which countries, and works for flags not listed in langTokens.
+    private static func flagCount(_ text: String) -> Int {
+        text.unicodeScalars.filter { (0x1F1E6...0x1F1FF).contains($0.value) }.count / 2
     }
 
     /// True when the stream advertises a resolution but its KNOWN file size is far too small to

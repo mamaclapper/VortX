@@ -22,6 +22,7 @@ struct SettingsView: View {
     @AppStorage(TrackPreferences.Key.subtitle) private var prefSubLang = TrackPreferences.deviceLanguages.first ?? "en"
     @AppStorage(PlaybackSettings.Key.directLinksOnly) private var directLinksOnly = false
     @AppStorage(PerformanceMode.overrideKey) private var perfMode = "auto"
+    @AppStorage(AudioOutputMode.key) private var audioOutput = AudioOutputMode.auto.rawValue
     @ObservedObject private var sourcePrefs = SourcePreferences.shared
 
     var body: some View {
@@ -163,6 +164,9 @@ struct SettingsView: View {
                 }
                 .buttonStyle(RowFocusStyle())
             }
+            choiceRow("Audio output", AudioOutputMode.allCases.map { ($0.rawValue, $0.label) }, selection: $audioOutput)
+            Text(AudioOutputMode(rawValue: audioOutput)?.detail ?? "")
+                .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
         }
     }
 

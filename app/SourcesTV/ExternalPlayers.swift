@@ -44,12 +44,15 @@ enum ExternalPlayers {
         }
     }
 
-    /// What the player menu should list: the installed players if any are detected,
-    /// otherwise the full curated list (so the menu is never empty and the user can
-    /// pick whichever they have, even when detection is blocked).
+    /// What the player menu should list: ALWAYS the full curated list. canOpenURL detection is
+    /// unreliable on tvOS (it can both miss an installed player and false-positive a single scheme,
+    /// which is why the menu was showing only VLC even with nothing installed), so every player
+    /// stays selectable and the user picks whichever they actually have. Detected players sort
+    /// first so a known-installed one is the top pick; opening an absent player just no-ops.
     static func menu() -> [Player] {
         let installed = detected()
-        return installed.isEmpty ? candidates : installed
+        let installedIDs = Set(installed.map(\.id))
+        return installed + candidates.filter { !installedIDs.contains($0.id) }
     }
 
     /// True when this player is detected as installed (so the menu can mark untested rows).
