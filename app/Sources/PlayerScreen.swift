@@ -8,8 +8,16 @@ import AppKit
 struct PlayerScreen: View {
     let url: URL
     let title: String
+    var headers: [String: String]? = nil                    // behaviorHints.proxyHeaders for header-gated CDNs
     var resumeSeconds: Double = 0                            // saved position to resume from
     var hasNext: Bool = false                               // show the Next Episode button
+    // Continue-Watching / quality-continuity parity with tvOS: when set, the working link is recorded
+    // into LastStreamStore once playback actually starts, so a later CW tap can resume this exact
+    // stream and reopening the title auto-picks the same quality. nil for ad-hoc plays (paste-a-link),
+    // which have no library item to key the memory against. Mirrors TVPlayerView.LastStreamStore.record.
+    var recordMeta: PlaybackMeta? = nil
+    var recordQualityText: String? = nil                    // StreamRanking.signature(stream) of the launching stream
+    var recordIsTorrent: Bool = false                       // stream rides the embedded torrent engine
     var onProgress: (Double, Double) -> Void = { _, _ in }   // periodic forward progress (TimeChanged)
     var onSeek: (Double, Double) -> Void = { _, _ in }       // exact position on user-seek (Seek)
     var onNext: () -> Void = {}                             // advance to the next episode
@@ -62,7 +70,7 @@ struct PlayerScreen: View {
             Color.black.ignoresSafeArea()
 
             MPVMetalPlayerView(coordinator: coordinator)
-                .play(url)
+                .play(initialPlayback.url, headers: initialPlayback.headers)
                 .onPropertyChange { _, name, data in
                     switch name {
                     case MPVProperty.pausedForCache: if let b = data as? Bool { buffering = b }
@@ -70,6 +78,7 @@ struct PlayerScreen: View {
                         if let d = data as? Double {
                             if d > 0, !hasStartedPlaying {      // playback actually began
                                 hasStartedPlaying = true; loadTimeout?.cancel(); loadFailed = false
+                                recordLastStream()              // remember this working link for CW direct-resume (parity with tvOS)
                             }
                             if !scrubbing {
                                 currentTime = d
@@ -162,7 +171,35 @@ struct PlayerScreen: View {
         return "Send this stream to \(names.joined(separator: " or ")), or share it elsewhere."
     }
 
+    /// Persist the exact link that just started playing into LastStreamStore, so Continue-Watching can
+    /// one-tap resume this stream and reopening the title auto-picks the same quality — the iOS/Mac twin
+    /// of TVPlayerView's record-on-start (previously only tvOS recorded, so iOS/Mac-first watches never
+    /// seeded resume). Records the bare `url`/`headers` the player was launched with (a proxied loopback
+    /// URL is rebuilt from these on resume), not the internal `initialPlayback` rewrite. No-op for ad-hoc
+    /// plays with no `recordMeta` (e.g. paste-a-link), which have no library item to key against.
+    private func recordLastStream() {
+        guard let m = recordMeta else { return }
+        LastStreamStore.record(libraryId: m.libraryId, entry: .init(
+            videoId: m.videoId, url: url.absoluteString, title: title,
+            season: m.season, episode: m.episode, name: m.name,
+            poster: m.poster, type: m.type, qualityText: recordQualityText,
+            torrent: recordIsTorrent, savedAt: Date(), headers: headers),
+            profileID: ProfileStore.shared.activeID)
+    }
+
     // MARK: - Load failure handling
+
+    /// The play URL/headers, routed through the embedded server's proxy when the stream declares
+    /// request headers (the official-Stremio path that makes picky CDNs like ok.ru play). The server
+    /// applies the headers + rewrites the HLS playlist, so mpv fetches plain loopback and needs no
+    /// headers of its own; everything else loads directly with mpv-applied headers. Mirrors the tvOS
+    /// player's `initialPlayback` so iOS/Mac no longer 403 on header-gated sources.
+    private var initialPlayback: (url: URL, headers: [String: String]?) {
+        if let h = headers, !h.isEmpty, let proxied = StremioServer.proxiedURL(for: url, headers: h) {
+            return (proxied, nil)
+        }
+        return (url, headers)
+    }
 
     private var loadErrorOverlay: some View {
         ZStack {
@@ -202,7 +239,7 @@ struct PlayerScreen: View {
     private func retryLoad() {
         withAnimation { loadFailed = false }
         buffering = true; hasStartedPlaying = false; appliedSize = false; loadErrorMsg = ""
-        coordinator.player?.loadFile(url)
+        coordinator.player?.loadFile(initialPlayback.url, headers: initialPlayback.headers)
         startLoadTimeout()
     }
 

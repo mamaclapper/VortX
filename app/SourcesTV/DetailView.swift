@@ -10,6 +10,7 @@ struct DetailView: View {
     @EnvironmentObject private var core: CoreBridge
     @EnvironmentObject private var theme: ThemeManager
     @EnvironmentObject private var profiles: ProfileStore
+    @EnvironmentObject private var presenter: PlayerPresenter   // root-replacement player presentation (Trailer)
 
     var body: some View {
         Group {
@@ -91,6 +92,8 @@ struct DetailView: View {
                                 .lineLimit(4).lineSpacing(2)
                                 .frame(maxWidth: 1000, alignment: .leading)
                         }
+                        HStack(spacing: Theme.Space.sm) { trailerChip(m) }
+                            .padding(.top, Theme.Space.xs)
                     }
                     CoreStreamList(title: m.name,
                                    meta: PlaybackMeta(libraryId: m.id, videoId: m.id, type: type,
@@ -172,6 +175,7 @@ struct DetailView: View {
                             .buttonStyle(ChipButtonStyle())
                         }
                         LibraryChip()
+                        trailerChip(m)
                         Spacer(minLength: 0)
                     }
                 }
@@ -181,6 +185,21 @@ struct DetailView: View {
             .padding(.bottom, Theme.Space.lg)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Trailer chip. Plays the meta's trailer as a one-off clip through the player (no torrent, no
+    /// meta, no progress / auto-next). Shown only when a playable trailer URL exists — for a
+    /// YouTube-only trailer that needs the embedded server's `/yt` route, this is false on the Lite
+    /// build (StremioServer.canProxy == false), so the chip auto-hides there.
+    @ViewBuilder private func trailerChip(_ m: CoreMetaItem) -> some View {
+        if let req = TrailerRequest.from(meta: m), let url = req.playableURL {
+            Button {
+                presenter.request = PlaybackRequest(url: url, title: "\(m.name) — Trailer")
+            } label: {
+                Label("Trailer", systemImage: "film")
+            }
+            .buttonStyle(ChipButtonStyle())
+        }
     }
 
     private func metaRow(_ m: CoreMetaItem) -> some View {

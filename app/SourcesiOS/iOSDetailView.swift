@@ -1,14 +1,36 @@
 import SwiftUI
 
+/// Torrents: ask the embedded server to start fetching peers before playback. No-op for direct/debrid
+/// URLs (those carry a `url`, so no `/create` is needed). Port of the tvOS `prepareTorrent`, reusing
+/// the shared `TorrentTrackers.sources` so the create carries the TCP/TLS trackers that reach a swarm
+/// from a sandboxed app. File-private free function so both the movie list and the per-episode list
+/// share one implementation.
+private func prepareTorrentStream(_ stream: CoreStream) {
+    guard !PlaybackSettings.torrentsDisabled else { return }
+    guard stream.url == nil, let hash = stream.infoHash?.lowercased(),
+          let url = URL(string: "\(StremioServer.base)/\(hash)/create") else { return }
+    let sources = TorrentTrackers.sources(forHash: hash, streamSources: stream.sources)
+    let body: [String: Any] = ["torrent": ["infoHash": hash],
+                               "peerSearch": ["sources": sources, "min": 40, "max": 150]]
+    guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = data
+    URLSession.shared.dataTask(with: request).resume()
+}
+
 /// Touch / Mac detail page. Loads meta through the shared engine, then presents the same cinematic
 /// composition the tvOS `DetailView` uses — a full-bleed backdrop from `meta.background` with a dark
 /// gradient scrim, the hero (logo or title, year · runtime · genres · rating, synopsis) over it, a
 /// Play / Watch action, and the source list styled as surface cards. Series show a season selector and
-/// an episode list; each episode loads and plays its own ranked best source.
+/// an episode list; tapping an episode pushes its own per-episode source-list screen (`iOSEpisodeStreams`)
+/// with the full ranked sources + Quality picker, mirroring the tvOS `CoreEpisodeStreams` flow.
 ///
-/// Only the PRESENTATION mirrors tvOS. The engine wiring is unchanged: `loadMeta` / `meta_details` /
-/// `streamGroups`, `StreamRanking.best`, resume, and the native `PlayerScreen` launch all behave
-/// exactly as before. tvOS-only SwiftUI API is gated with `#if os(tvOS)`; this compiles on iOS 16 and
+/// The PRESENTATION mirrors tvOS, and playback is now primed like tvOS too: before launching the
+/// player, every play path wires the engine Player and (for torrents) creates the torrent on the
+/// embedded server, and carries the stream's `requestHeaders` through to the player. tvOS-only
+/// SwiftUI API is gated with `#if os(tvOS)`; this compiles on iOS 16 and
 /// macOS.
 struct iOSDetailView: View {
     let id: String
@@ -17,20 +39,41 @@ struct iOSDetailView: View {
     @EnvironmentObject private var core: CoreBridge
     @EnvironmentObject private var account: StremioAccount
     @EnvironmentObject private var theme: ThemeManager   // observe textScale so Theme.Typography repaints live
+    @EnvironmentObject private var profiles: ProfileStore   // per-profile watched set + episode progress
 
-    @State private var player: PlayerLaunch?
-    @State private var trailer: TrailerLaunch?           // Netflix-style trailer cover
+    // A SINGLE presentation slot drives every full-screen cover (player OR trailer). On macOS the
+    // `platformFullScreenPlayerCover(item:)` calls become a `.sheet(item:)`, and two sheets attached to
+    // the same view shadow each other — so tapping Watch could fail to present the player at all.
+    // Driving both from one enum-typed item guarantees exactly one cover is ever attached, so Watch
+    // always presents reliably. The player-cover variant sizes its content to fill the macOS window.
+    @State private var presentation: Presentation?
     @State private var preparing = false                 // movie Watch Now is resolving
-    @State private var preparingEpisodeID: String?       // which episode row is resolving
     @State private var season = 1
 
-    /// A resolved stream ready to hand to PlayerScreen (Identifiable so fullScreenCover(item:) drives it).
-    private struct PlayerLaunch: Identifiable {
+    /// The one thing presented full-screen at a time: a resolved player stream or the YouTube trailer.
+    private enum Presentation: Identifiable {
+        case player(PlayerLaunch)
+        case trailer(TrailerLaunch)
+        var id: String {
+            switch self {
+            case .player(let l): "player-\(l.id)"
+            case .trailer(let l): "trailer-\(l.youTubeID)"
+            }
+        }
+    }
+
+    /// A resolved stream ready to hand to PlayerScreen (Identifiable so the cover can drive it).
+    struct PlayerLaunch: Identifiable {
         let id = UUID()
         let url: URL
         let title: String
+        let headers: [String: String]?       // behaviorHints.proxyHeaders, carried through to the player
         let resume: Double
         let meta: PlaybackMeta
+        /// Quality signature + torrent flag of the launching stream, recorded into LastStreamStore on
+        /// playback start (CW direct-resume + quality-continuity parity with tvOS).
+        var qualityText: String? = nil
+        var isTorrent: Bool = false
     }
 
     /// The hero artwork height scales with the platform: phones get a shorter band, the Mac a taller one.
@@ -59,17 +102,20 @@ struct iOSDetailView: View {
         .inlineNavigationTitle()
         .onAppear { core.loadMeta(type: type, id: id) }
         .onDisappear { core.unloadMeta() }
-        .platformFullScreenCover(item: $player) { launch in
-            PlayerScreen(
-                url: launch.url, title: launch.title, resumeSeconds: launch.resume,
-                onProgress: { pos, dur in Task { await account.saveProgress(for: launch.meta, positionSeconds: pos, durationSeconds: dur) } },
-                onSeek: { pos, dur in Task { await account.saveProgress(for: launch.meta, positionSeconds: pos, durationSeconds: dur) } },
-                onClose: { player = nil }
-            )
-            .ignoresSafeArea()
-        }
-        .platformFullScreenCover(item: $trailer) { launch in
-            TrailerPlayerScreen(launch: launch, onClose: { trailer = nil })
+        .platformFullScreenPlayerCover(item: $presentation) { item in
+            switch item {
+            case .player(let launch):
+                PlayerScreen(
+                    url: launch.url, title: launch.title, headers: launch.headers, resumeSeconds: launch.resume,
+                    recordMeta: launch.meta, recordQualityText: launch.qualityText, recordIsTorrent: launch.isTorrent,
+                    onProgress: { pos, dur in Task { await account.saveProgress(for: launch.meta, positionSeconds: pos, durationSeconds: dur) } },
+                    onSeek: { pos, dur in Task { await account.saveProgress(for: launch.meta, positionSeconds: pos, durationSeconds: dur) } },
+                    onClose: { presentation = nil }
+                )
+                .ignoresSafeArea()
+            case .trailer(let launch):
+                TrailerPlayerScreen(launch: launch, onClose: { presentation = nil })
+            }
         }
     }
 
@@ -77,7 +123,7 @@ struct iOSDetailView: View {
     /// itself fails, handled inside `TrailerPlayerScreen`).
     private func playTrailer() {
         guard let yt = meta?.trailerYouTubeID else { return }
-        trailer = TrailerLaunch(youTubeID: yt, title: meta?.name ?? title)
+        presentation = .trailer(TrailerLaunch(youTubeID: yt, title: meta?.name ?? title))
     }
 
     /// A standalone Trailer chip, shown only when the meta carries a YouTube trailer. Used in both the
@@ -102,14 +148,7 @@ struct iOSDetailView: View {
                 if type == "movie" {
                     watchNow
                 } else {
-                    // Series have their actions in the episode list below; surface only the trailer
-                    // chip here (when present) so the hero still offers a quick first action.
-                    HStack(spacing: Theme.Space.sm) {
-                        trailerButton
-                        iOSLibraryChip()
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.top, Theme.Space.xs)
+                    seriesHeroActions
                 }
                 if let overview = meta?.description, !overview.isEmpty {
                     Text(overview)
@@ -199,6 +238,117 @@ struct iOSDetailView: View {
         .foregroundStyle(Theme.Palette.textSecondary)
     }
 
+    // MARK: Series — hero Resume/Play affordance (mirrors tvOS DetailView.seriesPrimaryEpisode)
+
+    /// The watched episode-id set for the open series: the engine's computed set for
+    /// engine-history profiles, the profile overlay's set otherwise — the exact same
+    /// invariant tvOS uses for its ticks, dimming, and primary-episode pick.
+    private var watchedSet: Set<String> {
+        guard let m = meta else { return [] }
+        return profiles.activeUsesEngineHistory
+            ? (core.metaDetails?.watchedIds ?? [])
+            : profiles.watchedVideoIds(forMeta: m.id)
+    }
+
+    /// Series hero: a primary "Resume S#E#" / "Play S#E#" button (with a progress stripe when the
+    /// resume episode is partially watched), then the trailer + library chips — the touch/Mac twin
+    /// of the tvOS series hero. Tapping it pushes that episode's source list (the same screen an
+    /// episode-row tap opens), so the user still picks the source.
+    @ViewBuilder private var seriesHeroActions: some View {
+        let primary = meta?.videos.flatMap { seriesPrimaryEpisode($0) }
+        let primaryProgress = primary.map { episodeProgress($0.video) } ?? 0
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            HStack(spacing: Theme.Space.sm) {
+                if let m = meta, let primary {
+                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                        NavigationLink {
+                            iOSEpisodeStreams(meta: m, video: primary.video, season: primary.video.season ?? 1)
+                        } label: {
+                            Label(primaryEpisodeLabel(primary.video, isResume: primary.isResume),
+                                  systemImage: "play.fill")
+                        }
+                        .buttonStyle(PrimaryActionStyle())
+                        if primary.isResume, primaryProgress > 0.01 {
+                            iOSProgressStripe(value: primaryProgress)
+                                .frame(width: 160)
+                        }
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+                trailerButton
+                iOSLibraryChip()
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.top, Theme.Space.xs)
+    }
+
+    /// Resume position (the saved episode, if not yet watched) vs the first unwatched episode,
+    /// vs the first episode — a straight port of the tvOS `seriesPrimaryEpisode`.
+    private func seriesPrimaryEpisode(_ videos: [CoreVideo]) -> (video: CoreVideo, isResume: Bool)? {
+        guard let m = meta else { return nil }
+        let sorted = sortedEpisodes(videos)
+        let watched = watchedSet
+        // Engine-history profiles read the engine library entry; overlay profiles their own entry,
+        // exactly as resume / progress resolve everywhere else.
+        let resume: (videoId: String?, timeOffsetMs: Double) = {
+            guard profiles.activeUsesEngineHistory else {
+                let entry = profiles.watch[m.id]
+                return (entry?.videoId, Double(entry?.timeOffsetMs ?? 0))
+            }
+            let state = core.metaDetails?.libraryItem?.state
+            return (state?.videoId, state?.timeOffset ?? 0)
+        }()
+        if resume.timeOffsetMs > 0,
+           let videoId = resume.videoId,
+           let video = sorted.first(where: { $0.id == videoId }),
+           !watched.contains(video.id) {
+            return (video, true)
+        }
+        if let next = sorted.first(where: { !watched.contains($0.id) }) {
+            return (next, false)
+        }
+        return sorted.first.map { ($0, false) }
+    }
+
+    private func primaryEpisodeLabel(_ video: CoreVideo, isResume: Bool) -> String {
+        let prefix = isResume ? "Resume" : "Play"
+        guard let season = video.season else { return "\(prefix) Episode \(video.episodeNumber)" }
+        return "\(prefix) S\(season) E\(video.episodeNumber)"
+    }
+
+    private func sortedEpisodes(_ videos: [CoreVideo]) -> [CoreVideo] {
+        videos.sorted {
+            let leftSeason = $0.season ?? 0
+            let rightSeason = $1.season ?? 0
+            if leftSeason != rightSeason { return leftSeason < rightSeason }
+            let leftEpisode = $0.episode ?? 0
+            let rightEpisode = $1.episode ?? 0
+            if leftEpisode != rightEpisode { return leftEpisode < rightEpisode }
+            return $0.id < $1.id
+        }
+    }
+
+    /// First-unwatched season in air order, used for the initial season selection.
+    private var firstUnwatchedSeason: Int? {
+        guard let videos = meta?.videos else { return nil }
+        let watched = watchedSet
+        return sortedEpisodes(videos).first { !watched.contains($0.id) }?.season
+    }
+
+    /// 0…1 watch progress for one episode (overlay or engine source, matching the resume invariant).
+    private func episodeProgress(_ v: CoreVideo) -> Double {
+        guard let m = meta else { return 0 }
+        guard profiles.activeUsesEngineHistory else {
+            guard let entry = profiles.watch[m.id], entry.videoId == v.id else { return 0 }
+            return entry.progress
+        }
+        guard let item = core.metaDetails?.libraryItem,
+              item.state.videoId == v.id,
+              item.state.duration > 0 else { return 0 }
+        return min(max(item.state.timeOffset / item.state.duration, 0), 1)
+    }
+
     // MARK: Movie — Watch Now + sources
 
     @ViewBuilder private var watchNow: some View {
@@ -228,37 +378,67 @@ struct iOSDetailView: View {
     /// component owns the filter / collapse state; it plays a chosen source through `playStream`.
     @ViewBuilder private var sourceSection: some View {
         iOSSourceList(
-            groups: StreamRanking.rankedGroups(core.streamGroups()),
+            groups: StreamRanking.rankedGroups(displayGroups(core.streamGroups())),
             progress: core.streamLoadProgress(),
+            continuity: rememberedQuality,
             play: { stream, url in Task { await playStream(stream, url: url) } }
         )
         .padding(.horizontal, Theme.Space.md)
     }
 
-    private var movieReady: Bool { meta != nil && StreamRanking.best(core.streamGroups()) != nil }
+    /// Apply the Direct-links-only filter (drop every torrent source) so a user with the setting on
+    /// never sees or auto-plays a torrent — the exact `displayGroups` the tvOS `CoreStreamList` uses.
+    private func displayGroups(_ groups: [CoreStreamSourceGroup]) -> [CoreStreamSourceGroup] {
+        guard PlaybackSettings.directLinksOnly else { return groups }
+        return groups.compactMap { group in
+            let streams = group.streams.filter { !$0.isTorrent }
+            guard !streams.isEmpty else { return nil }
+            return CoreStreamSourceGroup(id: group.id, addon: group.addon, streams: streams)
+        }
+    }
+
+    /// The quality signature this title last played in (per profile), so reopening it auto-picks the
+    /// remembered quality with same-release-group biasing — the tvOS `LastStreamStore` continuity hint.
+    private var rememberedQuality: String? {
+        guard let m = meta else { return nil }
+        return LastStreamStore.entry(for: m.id, profileID: ProfileStore.shared.activeID)?.qualityText
+    }
+
+    /// The best source for the movie, honoring Direct-links-only and the remembered-quality continuity.
+    private var movieBest: CoreStream? {
+        StreamRanking.best(displayGroups(core.streamGroups()), continuity: rememberedQuality)
+    }
+
+    private var movieReady: Bool { meta != nil && movieBest != nil }
 
     private var movieLabel: String {
         if preparing { return "Finding the best source…" }
-        guard movieReady, let s = StreamRanking.best(core.streamGroups()) else { return "Loading sources…" }
+        guard movieReady, let s = movieBest else { return "Loading sources…" }
         return "Watch  ·  \(StreamRanking.qualityLabel(s))"
     }
 
     private func playMovie() async {
-        guard !preparing, let m = meta, let stream = StreamRanking.best(core.streamGroups()),
+        guard !preparing, let m = meta, let stream = movieBest,
               let url = stream.playableURL else { return }
         preparing = true; defer { preparing = false }
+        primePlayback(stream)
         let pm = PlaybackMeta(libraryId: m.id, videoId: m.id, type: "movie",
                               name: m.name, poster: m.poster, season: nil, episode: nil)
-        player = PlayerLaunch(url: url, title: m.name, resume: await resume(pm), meta: pm)
+        presentation = .player(PlayerLaunch(url: url, title: m.name, headers: stream.requestHeaders,
+                                            resume: await resume(pm), meta: pm,
+                                            qualityText: StreamRanking.signature(stream), isTorrent: stream.isTorrent))
     }
 
     /// Play an arbitrary chosen movie source (a tapped source-list row).
     private func playStream(_ stream: CoreStream, url: URL) async {
         guard !preparing, let m = meta else { return }
         preparing = true; defer { preparing = false }
+        primePlayback(stream)
         let pm = PlaybackMeta(libraryId: m.id, videoId: m.id, type: "movie",
                               name: m.name, poster: m.poster, season: nil, episode: nil)
-        player = PlayerLaunch(url: url, title: m.name, resume: await resume(pm), meta: pm)
+        presentation = .player(PlayerLaunch(url: url, title: m.name, headers: stream.requestHeaders,
+                                            resume: await resume(pm), meta: pm,
+                                            qualityText: StreamRanking.signature(stream), isTorrent: stream.isTorrent))
     }
 
     // MARK: Series — season selector + episode cards
@@ -266,16 +446,20 @@ struct iOSDetailView: View {
     @ViewBuilder private var episodeList: some View {
         if let videos = meta?.videos, !videos.isEmpty {
             let seasons = Array(Set(videos.compactMap { $0.season })).sorted()
+            let watched = watchedSet
             VStack(alignment: .leading, spacing: Theme.Space.md) {
                 iOSRailHeader(eyebrow: "\(episodes(videos).count) episode\(episodes(videos).count == 1 ? "" : "s")",
                               title: "Episodes")
 
-                if seasons.count > 1 {
+                // Always render the season chips (even single-season): they host the per-season /
+                // whole-series Mark-Watched menu (long-press), the same as tvOS.
+                if !seasons.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: Theme.Space.sm) {
                             ForEach(seasons, id: \.self) { s in
                                 Button { season = s } label: { Text(seasonLabel(s)) }
                                     .buttonStyle(ChipButtonStyle(selected: season == s))
+                                    .contextMenu { seasonWatchedMenu(s) }
                             }
                         }
                         .padding(.vertical, Theme.Space.xs)
@@ -283,45 +467,91 @@ struct iOSDetailView: View {
                 }
 
                 VStack(spacing: Theme.Space.sm) {
-                    ForEach(episodes(videos), id: \.id) { v in episodeRow(v) }
+                    ForEach(episodes(videos), id: \.id) { v in
+                        episodeRow(v, isWatched: watched.contains(v.id), progress: episodeProgress(v))
+                    }
                 }
             }
             .padding(.horizontal, Theme.Space.md)
-            .onAppear { if let first = seasons.first, !seasons.contains(season) { season = first } }
+            // Initial season = first-unwatched season, else the first non-special, else season 1 —
+            // the tvOS `initialSeason ?? firstUnwatchedSeason ?? first non-special` rule.
+            .onAppear {
+                let preferred = firstUnwatchedSeason ?? seasons.first { $0 > 0 } ?? seasons.first ?? 1
+                if seasons.contains(preferred) { season = preferred }
+                else if !seasons.contains(season) { season = seasons.first { $0 > 0 } ?? seasons.first ?? 1 }
+            }
         }
     }
 
-    private func episodeRow(_ v: CoreVideo) -> some View {
-        let isPreparing = preparingEpisodeID == v.id
-        return Button {
-            Task { await playEpisode(v) }
-        } label: {
-            HStack(alignment: .top, spacing: Theme.Space.md) {
-                episodeThumbnail(v, preparing: isPreparing)
-                VStack(alignment: .leading, spacing: 6) {
+    /// Per-season + whole-series Mark Watched / Unwatched, wired to the same CoreBridge methods the
+    /// tvOS season-chip context menu uses.
+    @ViewBuilder private func seasonWatchedMenu(_ s: Int) -> some View {
+        Button { core.markSeasonWatched(s, true) } label: {
+            Label("Mark \(seasonLabel(s)) Watched", systemImage: "checkmark.circle")
+        }
+        Button { core.markSeasonWatched(s, false) } label: {
+            Label("Mark \(seasonLabel(s)) Unwatched", systemImage: "arrow.uturn.backward")
+        }
+        Button { core.markWatched(true) } label: {
+            Label("Mark Whole Series Watched", systemImage: "checkmark.circle.fill")
+        }
+        Button { core.markWatched(false) } label: {
+            Label("Mark Whole Series Unwatched", systemImage: "circle")
+        }
+    }
+
+    /// Tapping an episode now PUSHES its own source-list screen (the full ranked sources + Quality
+    /// picker) instead of silently auto-playing the best source — mirroring the tvOS `CoreEpisodeStreams`
+    /// flow. The user sees every source for that episode and picks one, which plays via the primed path.
+    @ViewBuilder private func episodeRow(_ v: CoreVideo, isWatched: Bool, progress: Double) -> some View {
+        if let m = meta {
+            NavigationLink {
+                iOSEpisodeStreams(meta: m, video: v, season: v.season ?? season)
+            } label: {
+                episodeRowLabel(v, isWatched: isWatched, progress: progress)
+            }
+            .buttonStyle(RowFocusStyle())
+            .contextMenu {
+                Button(isWatched ? "Mark as Unwatched" : "Mark as Watched") {
+                    core.markVideoWatched(v, !isWatched)
+                }
+            }
+        } else {
+            episodeRowLabel(v, isWatched: isWatched, progress: progress)
+        }
+    }
+
+    private func episodeRowLabel(_ v: CoreVideo, isWatched: Bool, progress: Double) -> some View {
+        HStack(alignment: .top, spacing: Theme.Space.md) {
+            episodeThumbnail(v, isWatched: isWatched, progress: progress)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    if isWatched {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.footnote).foregroundStyle(Theme.Palette.accent)
+                    }
                     Text("\(v.episodeNumber). \(v.episodeTitle)")
                         .font(Theme.Typography.cardTitle)
-                        .foregroundStyle(Theme.Palette.textPrimary)
+                        .foregroundStyle(isWatched ? Theme.Palette.textTertiary : Theme.Palette.textPrimary)
                         .lineLimit(2)
-                    if let aired = v.released, aired.count >= 10 {
-                        Text(String(aired.prefix(10)))
-                            .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textTertiary)
-                    }
-                    if let overview = v.overview, !overview.isEmpty {
-                        Text(overview)
-                            .font(Theme.Typography.body).foregroundStyle(Theme.Palette.textSecondary)
-                            .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                    }
                 }
-                Spacer(minLength: 0)
+                if let aired = v.released, aired.count >= 10 {
+                    Text(String(aired.prefix(10)))
+                        .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textTertiary)
+                }
+                if let overview = v.overview, !overview.isEmpty {
+                    Text(overview)
+                        .font(Theme.Typography.body).foregroundStyle(Theme.Palette.textSecondary)
+                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                }
             }
-            .padding(Theme.Space.md)
+            Spacer(minLength: 0)
         }
-        .buttonStyle(RowFocusStyle())
-        .disabled(preparingEpisodeID != nil)
+        .padding(Theme.Space.md)
+        .opacity(isWatched ? 0.55 : 1)
     }
 
-    private func episodeThumbnail(_ v: CoreVideo, preparing: Bool) -> some View {
+    private func episodeThumbnail(_ v: CoreVideo, isWatched: Bool, progress: Double) -> some View {
         AsyncImage(url: URL(string: v.thumbnail ?? "")) { phase in
             switch phase {
             case .success(let img): img.resizable().aspectRatio(contentMode: .fill)
@@ -332,13 +562,15 @@ struct iOSDetailView: View {
         }
         .frame(width: 132, height: 74)
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
-        .overlay {
-            if preparing {
-                ZStack {
-                    Color.black.opacity(0.45)
-                    ProgressView().tint(Theme.Palette.textPrimary)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
+        .overlay(alignment: .topTrailing) {
+            if isWatched {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.callout).foregroundStyle(Theme.Palette.accent).padding(5).shadow(radius: 3)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if !isWatched, progress > 0.01 {
+                iOSProgressStripe(value: progress).padding(4)
             }
         }
     }
@@ -350,29 +582,16 @@ struct iOSDetailView: View {
 
     private func seasonLabel(_ s: Int) -> String { s == 0 ? "Specials" : "Season \(s)" }
 
-    /// Load the episode's streams (the engine loads per-episode streams on demand), wait for a
-    /// playable source to land, rank the best, and present the player. Mirrors the tvOS flow.
-    private func playEpisode(_ v: CoreVideo) async {
-        guard preparingEpisodeID == nil, let m = meta else { return }
-        preparingEpisodeID = v.id
-        defer { preparingEpisodeID = nil }
-        core.loadMeta(type: "series", id: id, streamType: "series", streamId: v.id)
-        // Poll for this episode's streams (matched by id) for up to ~12s.
-        for _ in 0..<48 {
-            let groups = core.streamGroups(forStreamId: v.id)
-            if let best = StreamRanking.best(groups), let url = best.playableURL {
-                let name = "\(m.name)  ·  S\(v.season ?? season)E\(v.episodeNumber)"
-                let pm = PlaybackMeta(libraryId: m.id, videoId: v.id, type: "series",
-                                      name: m.name, poster: v.thumbnail ?? m.poster,
-                                      season: v.season, episode: v.episode)
-                player = PlayerLaunch(url: url, title: name, resume: await resume(pm), meta: pm)
-                return
-            }
-            try? await Task.sleep(for: .milliseconds(250))
-        }
-    }
-
     // MARK: Shared
+
+    /// Prime a picked stream for playback BEFORE the player launches — exactly what the tvOS `play()`
+    /// does. Wires the engine Player (so progress records against the right library item) and, for
+    /// torrents, asks the embedded server to start fetching peers. Without this, iOS/Mac launched the
+    /// player against a torrent the server had never been told to create, so the stream never played.
+    private func primePlayback(_ stream: CoreStream) {
+        core.loadEnginePlayer(for: stream)
+        prepareTorrentStream(stream)
+    }
 
     /// Engine-history profiles resume from the engine; everyone else from the account/overlay.
     private func resume(_ pm: PlaybackMeta) async -> Double {
@@ -385,6 +604,182 @@ struct iOSDetailView: View {
     private var meta: CoreMetaItem? {
         let m = core.metaDetails?.meta
         return m?.id == id ? m : nil
+    }
+}
+
+// MARK: - Per-episode source list (mirrors tvOS CoreEpisodeStreams)
+
+/// The screen pushed when a series episode is tapped — the touch/Mac twin of the tvOS
+/// `CoreEpisodeStreams`. It shows the episode's own backdrop, title, and overview, then the FULL
+/// ranked source list (with the Quality picker) via the shared `iOSSourceList`, fed with that
+/// episode's streamId. Picking a source primes playback (engine Player + torrent /create) and
+/// presents the native player — exactly like the movie path. This replaces the old behaviour where
+/// tapping an episode silently auto-played the best source and showed no sources / no quality picker.
+struct iOSEpisodeStreams: View {
+    let meta: CoreMetaItem
+    let video: CoreVideo
+    let season: Int
+    @EnvironmentObject private var core: CoreBridge
+    @EnvironmentObject private var account: StremioAccount
+    @EnvironmentObject private var theme: ThemeManager
+
+    @State private var player: iOSDetailView.PlayerLaunch?
+    @State private var preparing = false
+    @State private var settleTimedOut = false      // resolution gave up → show "No sources found", not a spinner
+
+    private var backdropHeight: CGFloat {
+        #if os(macOS)
+        return 460
+        #else
+        return 320
+        #endif
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Space.lg) {
+                hero
+                iOSSourceList(
+                    groups: StreamRanking.rankedGroups(displayGroups(core.streamGroups(forStreamId: video.id))),
+                    progress: core.streamLoadProgress(forStreamId: video.id),
+                    settleTimedOut: settleTimedOut,
+                    continuity: rememberedQuality,
+                    play: { stream, url in Task { await play(stream, url: url) } }
+                )
+                .padding(.horizontal, Theme.Space.md)
+            }
+            .padding(.bottom, Theme.Space.xl)
+        }
+        .background(Theme.Palette.canvas.ignoresSafeArea())
+        .navigationTitle(video.episodeTitle)
+        .inlineNavigationTitle()
+        // The engine loads per-episode streams on demand; trigger that load for THIS episode.
+        .onAppear { core.loadMeta(type: "series", id: meta.id, streamType: "series", streamId: video.id) }
+        .task {
+            try? await Task.sleep(for: .seconds(12))
+            settleTimedOut = true
+        }
+        .platformFullScreenPlayerCover(item: $player) { launch in
+            PlayerScreen(
+                url: launch.url, title: launch.title, headers: launch.headers, resumeSeconds: launch.resume,
+                recordMeta: launch.meta, recordQualityText: launch.qualityText, recordIsTorrent: launch.isTorrent,
+                onProgress: { pos, dur in Task { await account.saveProgress(for: launch.meta, positionSeconds: pos, durationSeconds: dur) } },
+                onSeek: { pos, dur in Task { await account.saveProgress(for: launch.meta, positionSeconds: pos, durationSeconds: dur) } },
+                onClose: { player = nil }
+            )
+            .ignoresSafeArea()
+        }
+    }
+
+    /// Episode backdrop + show eyebrow + episode title + S·E / air date / facts + overview, mirroring
+    /// the tvOS `CoreEpisodeStreams` header block.
+    private var hero: some View {
+        ZStack(alignment: .bottomLeading) {
+            backdrop
+            VStack(alignment: .leading, spacing: Theme.Space.sm) {
+                Text(meta.name.uppercased())
+                    .font(Theme.Typography.eyebrow).tracking(1.5)
+                    .foregroundStyle(Theme.Palette.accent)
+                Text(video.episodeTitle)
+                    .font(Theme.Typography.hero).tracking(-1)
+                    .foregroundStyle(Theme.Palette.textPrimary)
+                    .lineLimit(3).minimumScaleFactor(0.6)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
+                metaRow
+                if let overview = video.overview, !overview.isEmpty {
+                    Text(overview)
+                        .font(Theme.Typography.body)
+                        .foregroundStyle(Theme.Palette.textSecondary)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 760, alignment: .leading)
+                }
+            }
+            .padding(.horizontal, Theme.Space.md)
+            .padding(.bottom, Theme.Space.lg)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var backdrop: some View {
+        AsyncImage(url: URL(string: video.thumbnail ?? meta.background ?? meta.poster ?? "")) { phase in
+            switch phase {
+            case .success(let img): img.resizable().aspectRatio(contentMode: .fill)
+            default: Theme.Palette.surface1
+            }
+        }
+        .frame(height: backdropHeight)
+        .frame(maxWidth: .infinity)
+        .clipped()
+        .overlay(
+            LinearGradient(stops: [
+                .init(color: .clear, location: 0.0),
+                .init(color: Theme.Palette.canvas.opacity(0.35), location: 0.55),
+                .init(color: Theme.Palette.canvas.opacity(0.85), location: 0.85),
+                .init(color: Theme.Palette.canvas, location: 1.0),
+            ], startPoint: .top, endPoint: .bottom)
+        )
+        .overlay(
+            LinearGradient(colors: [Theme.Palette.canvas.opacity(0.6), .clear],
+                           startPoint: .leading, endPoint: .center)
+        )
+    }
+
+    private var metaRow: some View {
+        HStack(spacing: Theme.Space.md) {
+            Text("S\(season) · E\(video.episode ?? 0)")
+            if let released = video.released, released.count >= 10 { Text(String(released.prefix(10))) }
+            if let rt = meta.runtime { Text(rt) }
+            if let imdb = meta.imdbRating {
+                HStack(spacing: 6) {
+                    Image(systemName: "star.fill").foregroundStyle(Theme.Palette.accent)
+                    Text(imdb)
+                }
+            }
+            let genres = meta.genres
+            if !genres.isEmpty { Text(genres.prefix(3).joined(separator: " · ")).lineLimit(1) }
+        }
+        .font(Theme.Typography.label)
+        .foregroundStyle(Theme.Palette.textSecondary)
+    }
+
+    /// Play the tapped source: prime the engine + torrent (same path as the movie list), then present
+    /// the native player carrying the stream's proxy headers.
+    private func play(_ stream: CoreStream, url: URL) async {
+        guard !preparing else { return }
+        preparing = true; defer { preparing = false }
+        core.loadEnginePlayer(for: stream)
+        prepareTorrentStream(stream)
+        let name = "\(meta.name)  ·  S\(video.season ?? season)E\(video.episodeNumber)"
+        let pm = PlaybackMeta(libraryId: meta.id, videoId: video.id, type: "series",
+                              name: meta.name, poster: video.thumbnail ?? meta.poster,
+                              season: video.season, episode: video.episode)
+        player = iOSDetailView.PlayerLaunch(url: url, title: name, headers: stream.requestHeaders,
+                                            resume: await resume(pm), meta: pm,
+                                            qualityText: StreamRanking.signature(stream), isTorrent: stream.isTorrent)
+    }
+
+    private func resume(_ pm: PlaybackMeta) async -> Double {
+        if let engine = core.engineResumeSeconds(for: pm) { return engine }
+        return await account.resumeOffset(for: pm)
+    }
+
+    /// Direct-links-only: drop every torrent source so a user with the setting on never sees or
+    /// auto-plays one — the same `displayGroups` filter the tvOS `CoreStreamList` applies.
+    private func displayGroups(_ groups: [CoreStreamSourceGroup]) -> [CoreStreamSourceGroup] {
+        guard PlaybackSettings.directLinksOnly else { return groups }
+        return groups.compactMap { group in
+            let streams = group.streams.filter { !$0.isTorrent }
+            guard !streams.isEmpty else { return nil }
+            return CoreStreamSourceGroup(id: group.id, addon: group.addon, streams: streams)
+        }
+    }
+
+    /// The quality this series last played in (per profile), so the episode's Watch-in pick keeps the
+    /// same quality across episodes — the tvOS `LastStreamStore` continuity hint, keyed on the series id.
+    private var rememberedQuality: String? {
+        LastStreamStore.entry(for: meta.id, profileID: ProfileStore.shared.activeID)?.qualityText
     }
 }
 
@@ -411,6 +806,22 @@ private struct iOSRailHeader: View {
     }
 }
 
+/// A thin resume-progress bar (twin of the tvOS `ProgressStripe`, which lives in the tvOS-only
+/// SourcesTV target). Sits under an episode thumbnail or the series Resume button.
+private struct iOSProgressStripe: View {
+    let value: Double
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(.black.opacity(0.55))
+                Capsule().fill(Theme.Palette.accent)
+                    .frame(width: max(4, geo.size.width * min(max(value, 0), 1)))
+            }
+        }
+        .frame(height: 5)
+    }
+}
+
 /// The grouped, filterable source list for the touch / Mac detail page — the twin of tvOS
 /// `CoreStreamList`. Instead of a flat list of potentially thousands of streams, it offers:
 ///   • a **Watch in <quality>** primary button (best ranked source) + a **Quality** picker
@@ -425,6 +836,8 @@ private struct iOSRailHeader: View {
 struct iOSSourceList: View {
     let groups: [CoreStreamSourceGroup]
     let progress: (loaded: Int, total: Int)
+    var settleTimedOut = false                          // resolution gave up → show "No sources" not a spinner
+    var continuity: String? = nil                       // remembered quality signature → same-quality Watch-in pick
     let play: (CoreStream, URL) -> Void
 
     @State private var sourceFilter: String? = nil      // nil = all add-ons
@@ -433,7 +846,9 @@ struct iOSSourceList: View {
     @State private var qualityTier: String? = nil       // second-level quality sheet (a resolution tier)
 
     private var streamCount: Int { groups.reduce(0) { $0 + $1.streams.count } }
-    private var loading: Bool { progress.total == 0 || progress.loaded < progress.total }
+    // Still loading unless every add-on answered — OR the settle timeout fired, which flips a hung
+    // resolution to the real "No sources found" state instead of an endless spinner.
+    private var loading: Bool { !settleTimedOut && (progress.total == 0 || progress.loaded < progress.total) }
     private var visibleGroups: [CoreStreamSourceGroup] {
         groups.filter { sourceFilter == nil || $0.addon == sourceFilter }
     }
@@ -469,7 +884,9 @@ struct iOSSourceList: View {
     @ViewBuilder private var controlBar: some View {
         // The flow layout (HStack that wraps) is simulated with two rows so it stays tidy on a phone.
         VStack(alignment: .leading, spacing: Theme.Space.sm) {
-            if let best = StreamRanking.best(groups), let url = best.playableURL {
+            // Watch-in pick honors the remembered-quality continuity hint, so reopening a title lands
+            // on the same quality it last played (same-release-group biased) — matching tvOS.
+            if let best = StreamRanking.best(groups, continuity: continuity), let url = best.playableURL {
                 HStack(spacing: Theme.Space.sm) {
                     Button { play(best, url) } label: {
                         Label("Watch in \(StreamRanking.watchLabel(best))", systemImage: "play.fill")

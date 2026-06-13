@@ -23,6 +23,24 @@ enum NodeServer {
     /// The running child process, kept alive for the app's lifetime (and so we can terminate it).
     private static var process: Process?
 
+    /// Serializes all access to the mutable child state (`process`, `started`, `exitCode`,
+    /// `shutdownRequested`). startIfNeeded/restart/stop run on the main thread; the process's
+    /// terminationHandler fires on an arbitrary background thread. Funnelling every mutation
+    /// through one serial queue keeps them race-free without sprinkling locks. Matches the
+    /// serial-queue pattern used elsewhere in the shared sources (DiagnosticsLog, Keychain).
+    private static let queue = DispatchQueue(label: "com.stremiox.mac.nodeserver")
+
+    /// Set by `stop()` so the terminationHandler treats the kill as an intentional app-exit
+    /// shutdown — NOT a crash to surface in Settings. A `restart()` does NOT set this (it nils the
+    /// handler before terminating, so the handler never fires for a restart). Once set, the server
+    /// is considered down for good for this process lifetime.
+    private static var shutdownRequested = false
+
+    /// How long we wait for the child to exit after SIGTERM before escalating to SIGKILL on app
+    /// quit. Foundation's `Process.terminate()` sends SIGTERM, which a wedged node may ignore; the
+    /// SIGKILL escalation guarantees the port is released and nothing is reparented to launchd.
+    private static let terminateGrace: TimeInterval = 2.0
+
     // MARK: - LAN sharing ("act as a server for others on this network")
 
     /// UserDefaults key for the "Share streaming server on this network" toggle.
@@ -121,36 +139,78 @@ enum NodeServer {
         return text.split(separator: "\n").suffix(lines).map(String.init)
     }
 
-    /// Spawn the node server once. Idempotent. No-op if the node binary or server.js is missing.
+    /// Spawn the node server once. Idempotent. No-op if the node binary or server.js is missing,
+    /// or if the app is already shutting down (so a late call can't resurrect a killed server).
     static func startIfNeeded() {
-        guard !started else { return }
-        guard let nodeBin = Bundle.main.path(forResource: "node-darwin-arm64", ofType: nil) else {
-            NSLog("StremioX: node binary not found in bundle, streaming server disabled")
-            return
+        queue.sync {
+            guard !started, !shutdownRequested else { return }
+            guard let nodeBin = Bundle.main.path(forResource: "node-darwin-arm64", ofType: nil) else {
+                NSLog("StremioX: node binary not found in bundle, streaming server disabled")
+                return
+            }
+            guard let serverJs = Bundle.main.path(forResource: "server", ofType: "js") else {
+                NSLog("StremioX: server.js not found in bundle, streaming server disabled")
+                return
+            }
+            started = true
+            spawn(nodeBin: nodeBin, scriptPath: serverJs)
         }
-        guard let serverJs = Bundle.main.path(forResource: "server", ofType: "js") else {
-            NSLog("StremioX: server.js not found in bundle, streaming server disabled")
-            return
-        }
-        started = true
-        spawn(nodeBin: nodeBin, scriptPath: serverJs)
     }
 
     /// Terminate the running node process (if any) and relaunch it. Used when the LAN-sharing
     /// toggle flips, so the new bind (loopback vs all-interfaces) takes effect without an app
-    /// restart. No-op if the server was never eligible to start (missing binary / disabled).
+    /// restart. No-op if the server was never eligible to start (missing binary / disabled) or if
+    /// the app is shutting down. This is a RESTART, NOT a shutdown: it does NOT set
+    /// `shutdownRequested`, so the server comes back up afterwards.
     static func restart() {
-        guard !PlaybackSettings.torrentsDisabled,
-              let nodeBin = Bundle.main.path(forResource: "node-darwin-arm64", ofType: nil),
-              let serverJs = Bundle.main.path(forResource: "server", ofType: "js") else { return }
-        if let proc = process, proc.isRunning {
-            proc.terminationHandler = nil   // expected stop; don't surface it as a crash
-            proc.terminate()
+        queue.sync {
+            guard !shutdownRequested,
+                  !PlaybackSettings.torrentsDisabled,
+                  let nodeBin = Bundle.main.path(forResource: "node-darwin-arm64", ofType: nil),
+                  let serverJs = Bundle.main.path(forResource: "server", ofType: "js") else { return }
+            if let proc = process, proc.isRunning {
+                proc.terminationHandler = nil   // expected stop; don't surface it as a crash
+                proc.terminate()
+                proc.waitUntilExit()            // reap, so the relaunch can rebind 11470 cleanly
+            }
+            process = nil
+            exitCode = nil
+            started = true
+            spawn(nodeBin: nodeBin, scriptPath: serverJs)
         }
-        process = nil
-        exitCode = nil
-        started = true
-        spawn(nodeBin: nodeBin, scriptPath: serverJs)
+    }
+
+    /// Force-terminate the running node child and stop the server for this process lifetime. Called
+    /// on app termination (see StremioXiOSApp's macOS app-delegate hook) so the child never gets
+    /// reparented to launchd holding port 11470. Idempotent and thread-safe.
+    ///
+    /// Foundation's `Process` does NOT kill its child when the parent exits, so without this an app
+    /// quit leaks the node process. We send SIGTERM (`terminate()`), give it a short grace, then
+    /// escalate to SIGKILL for any wedged child, and `waitUntilExit()` to reap it (no zombie).
+    static func stop() {
+        queue.sync {
+            shutdownRequested = true        // mark intentional: the terminationHandler must not treat this as a crash
+            started = false
+            guard let proc = process else { return }
+            process = nil
+
+            // Detach the crash handler first: this exit is expected, not a failure to surface.
+            proc.terminationHandler = nil
+            guard proc.isRunning else { return }
+
+            proc.terminate()                // SIGTERM — ask node to exit cleanly
+            // Escalate to SIGKILL if it ignores SIGTERM, so the port is always released and nothing
+            // is reparented to launchd. `waitUntilExit()` then reaps the child (no zombie).
+            let deadline = Date().addingTimeInterval(terminateGrace)
+            while proc.isRunning && Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+            if proc.isRunning {
+                kill(proc.processIdentifier, SIGKILL)
+            }
+            proc.waitUntilExit()
+            NSLog("StremioX: node streaming server stopped on app termination")
+        }
     }
 
     // MARK: - Private
@@ -248,9 +308,15 @@ enum NodeServer {
             proc.standardError = fh
         }
 
+        // Fires on a background thread only for an UNEXPECTED exit (crash): stop()/restart() detach
+        // this handler before terminating, so an intentional kill never lands here. Route through
+        // the serial queue so the state write is race-free, and ignore it once shutdown began.
         proc.terminationHandler = { p in
-            exitCode = p.terminationStatus
-            NSLog("StremioX: node server exited rc=\(p.terminationStatus)")
+            queue.async {
+                guard !shutdownRequested else { return }
+                exitCode = p.terminationStatus
+                NSLog("StremioX: node server exited rc=\(p.terminationStatus)")
+            }
         }
 
         do {
