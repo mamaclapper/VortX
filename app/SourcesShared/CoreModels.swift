@@ -88,6 +88,10 @@ struct CoreMeta: Decodable, Identifiable {
     let name: String
     let poster: String?
     let posterShape: String?
+    /// The channel mark on live (tv/channel/events) catalog previews — channels publish a `logo`
+    /// instead of box-art, so the Live surface's `ChannelTile` prefers it over `poster`. Optional;
+    /// VOD previews omit it and decode fine.
+    let logo: String?
     // Optional preview details most catalog add-ons include; they power the focused-hero
     // backdrop on the browse pages. All optional so older/sparser add-ons still decode.
     let background: String?
@@ -174,11 +178,22 @@ struct CoreManifestCatalog: Decodable {
 
 // MARK: assembled UI row
 
-/// One Home board row: a titled, horizontally-scrolling catalog of meta previews.
+/// One Home board row: a titled, horizontally-scrolling catalog of meta previews. `type` is the
+/// catalog's content type (the per-row `request.path.type`, e.g. "movie" / "series" / "tv"), so a
+/// caller can pick out the Live rows (`LiveTypes`) without re-decoding the board state.
 struct CoreBoardRow: Identifiable {
     let id: String
     let title: String
+    let type: String
     let items: [CoreMeta]
+}
+
+/// The content types Stremio treats as Live TV (the same set tvOS uses for its live-tuned player
+/// path): broadcast TV, individual channels, and live events. Shared so the Live surface, the live
+/// detail branch, and the player all agree on what "live" means.
+enum LiveTypes {
+    static let all: Set<String> = ["tv", "channel", "events"]
+    static func contains(_ type: String) -> Bool { all.contains(type) }
 }
 
 // MARK: meta_details

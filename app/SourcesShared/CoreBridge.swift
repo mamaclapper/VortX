@@ -867,9 +867,17 @@ final class CoreBridge: ObservableObject {
             let items = catalog.compactMap { $0.content?.ready }.flatMap { $0 }
             guard !items.isEmpty else { continue }
             let key = Self.catalogKey(base: request.base, type: request.path.type, id: request.path.id)
-            rows.append(CoreBoardRow(id: key, title: titles[key] ?? request.path.id, items: items))
+            rows.append(CoreBoardRow(id: key, title: titles[key] ?? request.path.id,
+                                     type: request.path.type, items: items))
         }
         return rows
+    }
+
+    /// The Home board rows whose content type is Live TV (tv / channel / events), for the Live
+    /// surface. Derived from the already-published `boardRows`, so it tracks the engine's catalog
+    /// state live without a second decode and stays correct as add-ons are installed/removed.
+    var liveBoardRows: [CoreBoardRow] {
+        boardRows.filter { LiveTypes.contains($0.type) }
     }
 
     /// `{base|type|id → "Catalog name"}` from the installed addons' manifests. The addon's own catalog
