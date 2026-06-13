@@ -2,19 +2,20 @@ import SwiftUI
 
 /// Native iOS root: a CUSTOM bottom-tab shell over the shared engine. A native `TabView` collapses
 /// the 5th+ tabs into a system "More" tab on iPhone, burying Add-ons and Settings; instead we drive
-/// the visible screen with a `@State` selection and render our own brand-styled bar so all SIX tabs
+/// the visible screen with a `@State` selection and render our own brand-styled bar so all SEVEN tabs
 /// stay visible at once (matching the tvOS pill bar). Surfaces are filled in one at a time during the
 /// 0.3.0 rebase; Home is the first real one (poster rails from CoreBridge).
 struct iOSRootView: View {
-    /// The six destinations, in display order: Home · Discover · Library · Search · Add-ons · Settings
-    /// (Add-ons sits beside Settings, mirroring tvOS).
+    /// The seven destinations, in display order: Home · Discover · Live · Library · Search · Add-ons
+    /// · Settings (Live sits after Discover; Add-ons beside Settings, mirroring tvOS).
     private enum Tab: Int, CaseIterable {
-        case home, discover, library, search, addons, settings
+        case home, discover, live, library, search, addons, settings
 
         var title: String {
             switch self {
             case .home: return "Home"
             case .discover: return "Discover"
+            case .live: return "Live"
             case .library: return "Library"
             case .search: return "Search"
             case .addons: return "Add-ons"
@@ -26,6 +27,7 @@ struct iOSRootView: View {
             switch self {
             case .home: return "house.fill"
             case .discover: return "safari.fill"
+            case .live: return "dot.radiowaves.left.and.right"
             case .library: return "books.vertical.fill"
             case .search: return "magnifyingglass"
             case .addons: return "puzzlepiece.extension.fill"
@@ -44,6 +46,7 @@ struct iOSRootView: View {
             ZStack {
                 iOSHomeView().opacity(tab == .home ? 1 : 0)
                 iOSDiscoverView().opacity(tab == .discover ? 1 : 0)
+                iOSLiveView().opacity(tab == .live ? 1 : 0)
                 iOSLibraryView().opacity(tab == .library ? 1 : 0)
                 iOSSearchView().opacity(tab == .search ? 1 : 0)
                 AddonsView().opacity(tab == .addons ? 1 : 0)
@@ -57,7 +60,7 @@ struct iOSRootView: View {
         .tint(Theme.Palette.accent)
     }
 
-    /// Brand-styled bottom bar: six equal items, each a small SF Symbol over a caption label. The
+    /// Brand-styled bottom bar: seven equal items, each a small SF Symbol over a caption label. The
     /// selected item is tinted with the app accent; the rest read as tertiary text. A hairline +
     /// surface fill separates it from the content, and it respects the safe-area bottom inset.
     private var customTabBar: some View {

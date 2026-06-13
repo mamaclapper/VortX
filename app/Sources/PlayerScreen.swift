@@ -23,6 +23,17 @@ struct PlayerScreen: View {
     var onNext: () -> Void = {}                             // advance to the next episode
     let onClose: () -> Void
 
+    /// Whether this is a Live stream (tv / channel / events): when true the player engages libmpv's
+    /// live-tuned read-ahead/reconnect path (the same one tvOS uses), shows a "LIVE" indicator in
+    /// place of the seekable scrubber, and NO-OPs resume + progress (a live stream has no meaningful
+    /// position to restore or persist). Derived from the meta type via `LiveTypes`, but for a torrent
+    /// stream it stays VOD — a torrent is never a true live HLS feed. Mirrors the tvOS
+    /// `initialLiveMode`/`isCurrentLiveStream` invariant.
+    private var isLive: Bool {
+        guard let type = recordMeta?.type, LiveTypes.contains(type) else { return false }
+        return !recordIsTorrent
+    }
+
     private enum Panel: Identifiable {
         case speed, subtitles, audio, video
         var id: Int { switch self { case .speed: 0; case .subtitles: 1; case .audio: 2; case .video: 3 } }
@@ -71,6 +82,7 @@ struct PlayerScreen: View {
 
             MPVMetalPlayerView(coordinator: coordinator)
                 .play(initialPlayback.url, headers: initialPlayback.headers)
+                .live(isLive)
                 .onPropertyChange { _, name, data in
                     switch name {
                     case MPVProperty.pausedForCache: if let b = data as? Bool { buffering = b }
@@ -82,7 +94,10 @@ struct PlayerScreen: View {
                             }
                             if !scrubbing {
                                 currentTime = d
-                                if duration > 0, d - lastReported >= 5 {   // push progress ~every 5s
+                                // Live streams must NOT write a resume offset: their "position" is just
+                                // elapsed wall-clock of the buffer, and persisting it would make a later
+                                // open seek into a bogus offset (or drop a fake Continue-Watching entry).
+                                if !isLive, duration > 0, d - lastReported >= 5 {   // push progress ~every 5s
                                     lastReported = d
                                     onProgress(d, duration)
                                 }
@@ -178,6 +193,7 @@ struct PlayerScreen: View {
     /// URL is rebuilt from these on resume), not the internal `initialPlayback` rewrite. No-op for ad-hoc
     /// plays with no `recordMeta` (e.g. paste-a-link), which have no library item to key against.
     private func recordLastStream() {
+        guard !isLive else { return }   // live has no resumable position → don't seed CW direct-resume
         guard let m = recordMeta else { return }
         LastStreamStore.record(libraryId: m.libraryId, entry: .init(
             videoId: m.videoId, url: url.absoluteString, title: title,
@@ -252,7 +268,7 @@ struct PlayerScreen: View {
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
                     iconButton("chevron.down") {
-                        if duration > 0 { onProgress(currentTime, duration) }   // final progress before exit
+                        if !isLive, duration > 0 { onProgress(currentTime, duration) }   // final progress before exit (never for live)
                         onClose()
                     }
                     if !title.isEmpty {
@@ -294,18 +310,24 @@ struct PlayerScreen: View {
                 Spacer()
 
                 VStack(spacing: 14) {
-                    HStack(spacing: 12) {
-                        Text(timeString(currentTime)).font(.caption.monospacedDigit()).foregroundStyle(.white)
-                        Slider(value: $currentTime, in: 0...max(duration, 1)) { editing in
-                            scrubbing = editing
-                            if editing { hideTask?.cancel() }
-                            else {
-                                coordinator.player?.seek(to: currentTime)
-                                if duration > 0 { onSeek(currentTime, duration); lastReported = currentTime }
-                                scheduleHide()
-                            }
-                        }.tint(.white)
-                        Text(timeString(duration)).font(.caption.monospacedDigit()).foregroundStyle(.white)
+                    if isLive {
+                        // Live: no seekable scrubber (there's no fixed duration to scrub within), just
+                        // a LIVE indicator. The user pauses/resumes; there's nothing to seek to.
+                        liveIndicator
+                    } else {
+                        HStack(spacing: 12) {
+                            Text(timeString(currentTime)).font(.caption.monospacedDigit()).foregroundStyle(.white)
+                            Slider(value: $currentTime, in: 0...max(duration, 1)) { editing in
+                                scrubbing = editing
+                                if editing { hideTask?.cancel() }
+                                else {
+                                    coordinator.player?.seek(to: currentTime)
+                                    if duration > 0 { onSeek(currentTime, duration); lastReported = currentTime }
+                                    scheduleHide()
+                                }
+                            }.tint(.white)
+                            Text(timeString(duration)).font(.caption.monospacedDigit()).foregroundStyle(.white)
+                        }
                     }
 
                     HStack(spacing: 0) {
@@ -379,6 +401,23 @@ struct PlayerScreen: View {
             return audioTracks.map { t in Option(label: t.label, selected: t.selected) {
                 coordinator.player?.setAudioTrack(t.id)
             } }
+        }
+    }
+
+    /// The Live position indicator shown in place of the scrubber: a pulsing red dot + "LIVE", and a
+    /// running elapsed timer so the user can still see playback is advancing.
+    private var liveIndicator: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 7) {
+                Circle().fill(.red).frame(width: 9, height: 9)
+                Text("LIVE").font(.caption.weight(.heavy)).foregroundStyle(.white).tracking(1)
+            }
+            .padding(.horizontal, 11).padding(.vertical, 6)
+            .background(.black.opacity(0.4), in: Capsule())
+            Spacer()
+            if currentTime > 0 {
+                Text(timeString(currentTime)).font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.85))
+            }
         }
     }
 

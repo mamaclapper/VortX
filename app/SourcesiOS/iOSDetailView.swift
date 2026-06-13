@@ -88,11 +88,20 @@ struct iOSDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.lg) {
-                hero
-                if type == "series" {
-                    episodeList
+                // Live (tv / channel / events) gets its own stripped-down page BEFORE the movie
+                // fallback: backdrop + name + LIVE badge + the channel's source list, with no VOD
+                // chrome (no trailer chip, no movie synopsis framing, no skip/chapter UI). It still
+                // builds the player launch with the meta `type` preserved so the player's live path
+                // engages (see PlayerScreen + MPVMetalViewController.configureLiveMode).
+                if LiveTypes.contains(type) {
+                    livePage
                 } else {
-                    sourceSection
+                    hero
+                    if type == "series" {
+                        episodeList
+                    } else {
+                        sourceSection
+                    }
                 }
             }
             .padding(.bottom, Theme.Space.xl)
@@ -438,6 +447,66 @@ struct iOSDetailView: View {
                               name: m.name, poster: m.poster, season: nil, episode: nil)
         presentation = .player(PlayerLaunch(url: url, title: m.name, headers: stream.requestHeaders,
                                             resume: await resume(pm), meta: pm,
+                                            qualityText: StreamRanking.signature(stream), isTorrent: stream.isTorrent))
+    }
+
+    // MARK: Live — backdrop + LIVE badge + source list (no VOD chrome)
+
+    /// The Live channel page: the same cinematic backdrop + title block as a movie, but stripped of
+    /// VOD chrome — no trailer chip, no movie-style synopsis paragraph, no skip/chapter UI. A "LIVE"
+    /// badge sits beside the title, and the full channel source list lets the user pick a stream.
+    @ViewBuilder private var livePage: some View {
+        ZStack(alignment: .bottomLeading) {
+            backdrop
+            VStack(alignment: .leading, spacing: Theme.Space.sm) {
+                HStack(alignment: .center, spacing: Theme.Space.sm) {
+                    titleOrLogo
+                    liveBadge
+                }
+                metaRow
+            }
+            .padding(.horizontal, Theme.Space.md)
+            .padding(.bottom, Theme.Space.lg)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        liveSourceSection
+    }
+
+    /// The red "LIVE" pill that marks a live channel (the live counterpart to the VOD trailer/Watch
+    /// affordances this page drops).
+    private var liveBadge: some View {
+        Text("LIVE")
+            .font(Theme.Typography.eyebrow).tracking(1.5)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            .background(Theme.Palette.danger, in: Capsule())
+            .shadow(color: .black.opacity(0.4), radius: 4, y: 2)
+    }
+
+    /// The channel's source list, played through the live launch path (which preserves the live
+    /// `type` so the player tunes for live). Same component as the movie list, minus the
+    /// remembered-quality continuity hint (live streams don't carry meaningful quality memory).
+    @ViewBuilder private var liveSourceSection: some View {
+        iOSSourceList(
+            groups: StreamRanking.rankedGroups(displayGroups(core.streamGroups())),
+            progress: core.streamLoadProgress(),
+            play: { stream, url in Task { await playLiveStream(stream, url: url) } }
+        )
+        .padding(.horizontal, Theme.Space.md)
+    }
+
+    /// Play a chosen live channel source. Mirrors `playStream`, but the `PlaybackMeta.type` is the
+    /// channel's own live type (tv / channel / events), which the player reads via `LiveTypes` to
+    /// engage live tuning and to NO-OP resume/progress. No resume offset is requested or recorded —
+    /// a live stream has no meaningful position to restore.
+    private func playLiveStream(_ stream: CoreStream, url: URL) async {
+        guard !preparing, let m = meta else { return }
+        preparing = true; defer { preparing = false }
+        primePlayback(stream)
+        let pm = PlaybackMeta(libraryId: m.id, videoId: m.id, type: type,
+                              name: m.name, poster: m.poster, season: nil, episode: nil)
+        presentation = .player(PlayerLaunch(url: url, title: m.name, headers: stream.requestHeaders,
+                                            resume: 0, meta: pm,
                                             qualityText: StreamRanking.signature(stream), isTorrent: stream.isTorrent))
     }
 
