@@ -23,6 +23,7 @@ struct SettingsView: View {
     @AppStorage(PlaybackSettings.Key.directLinksOnly) private var directLinksOnly = false
     @AppStorage(PerformanceMode.overrideKey) private var perfMode = "auto"
     @AppStorage(AudioOutputMode.key) private var audioOutput = AudioOutputMode.auto.rawValue
+    @AppStorage(TrickplayManifestURLBuilder.serverURLKey) private var trickplayServerURL = ""
     @ObservedObject private var sourcePrefs = SourcePreferences.shared
 
     var body: some View {
@@ -154,6 +155,12 @@ struct SettingsView: View {
 
     private var playbackSection: some View {
         section("Playback") {
+            textFieldRow(
+                label: "Trickplay Server URL",
+                detail: "Base URL of your trickplay server to load scrub previews.",
+                placeholder: "http://...",
+                value: $trickplayServerURL
+            )
             if PlaybackSettings.directLinksOnlyForced {
                 directLinksOnlyRow
                     .background(Theme.Palette.surface1,
@@ -401,6 +408,24 @@ struct SettingsView: View {
             Text("Styles the built-in player's subtitles. Pick which subtitle track to show from the player while watching.")
                 .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
         }
+    }
+
+    private func textFieldRow(label: String, detail: String, placeholder: String,
+                              value: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
+            Text(label).font(Theme.Typography.cardTitle).foregroundStyle(Theme.Palette.textPrimary)
+            TextField(placeholder, text: value)
+                .font(Theme.Typography.body)
+                .foregroundStyle(Theme.Palette.textPrimary)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .padding(.horizontal, Theme.Space.sm).padding(.vertical, 10)
+                .background(Theme.Palette.canvas, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+            Text(detail)
+                .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .focusSection()
     }
 
     private func choiceRow(_ label: String, _ options: [(id: String, label: String)],

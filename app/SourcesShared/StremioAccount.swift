@@ -122,6 +122,57 @@ struct PlaybackMeta: Hashable {
     let poster: String?
     let season: Int?
     let episode: Int?
+
+    /// The IMDb id for this title (movies: libraryId/videoId, episodes: the imdb prefix from videoId).
+    var imdbId: String? {
+        Self.extractImdbId(from: libraryId) ?? Self.extractImdbId(from: videoId)
+    }
+
+    private static func extractImdbId(from raw: String) -> String? {
+        let pattern = #"tt\d+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(location: 0, length: raw.utf16.count)
+        guard let match = regex.firstMatch(in: raw, options: [], range: range),
+              let swiftRange = Range(match.range, in: raw) else { return nil }
+        return String(raw[swiftRange])
+    }
+}
+
+enum TrickplayManifestURLBuilder {
+    static let serverURLKey = "stremiox.trickplayServerURL"
+    private static let log = Logger(subsystem: "com.stremiox.app", category: "trickplay")
+
+    private static var baseURL: URL? {
+        let stored = UserDefaults.standard.string(forKey: serverURLKey) ?? ""
+        guard !stored.isEmpty else { return nil }
+        return URL(string: stored)
+    }
+
+    static func makeURL(for meta: PlaybackMeta?) -> URL? {
+        guard let meta else {
+            log.debug("trickplay URL build skipped: missing playback meta")
+            return nil
+        }
+        guard let baseURL else {
+            log.debug("trickplay URL build skipped: no server URL configured")
+            return nil
+        }
+        guard let imdbId = meta.imdbId else {
+            log.debug("trickplay URL build failed: no imdb id in libraryId=\(meta.libraryId, privacy: .public), videoId=\(meta.videoId, privacy: .public)")
+            return nil
+        }
+        let path = trickplayPath(for: meta, imdbId: imdbId)
+        let built = URL(string: path, relativeTo: baseURL)?.absoluteURL
+        log.debug("trickplay URL built imdb=\(imdbId, privacy: .public) type=\(meta.type, privacy: .public) season=\(meta.season ?? -1, privacy: .public) episode=\(meta.episode ?? -1, privacy: .public) url=\(built?.absoluteString ?? "nil", privacy: .public)")
+        return built
+    }
+
+    private static func trickplayPath(for meta: PlaybackMeta, imdbId: String) -> String {
+        if meta.type == "series", let season = meta.season, let episode = meta.episode {
+            return "/\(imdbId)/\(season)-\(episode)/storyboard.vtt"
+        }
+        return "/\(imdbId)/storyboard.vtt"
+    }
 }
 
 /// Manages the signed-in Stremio session: auth token (persisted), installed addons, and the

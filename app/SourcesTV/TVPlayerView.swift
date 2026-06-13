@@ -15,6 +15,7 @@ struct TVPlayerView: View {
     var torrent: Bool = false                  // stream rides the embedded torrent engine (gets warm-up patience)
     var bingeGroup: String? = nil              // the launching stream's release-group tag, for sticky auto-next
     var headers: [String: String]? = nil       // HTTP headers the stream's add-on requires (proxyHeaders)
+    var trickplayManifestURL: URL? = nil       // WebVTT trickplay manifest for scrub previews
     var onClose: () -> Void = {}           // dismiss the dedicated player window
 
     @EnvironmentObject private var account: StremioAccount
@@ -25,6 +26,7 @@ struct TVPlayerView: View {
     @State private var isPaused = false
     @State private var currentTime = 0.0
     @State private var duration = 0.0
+    @StateObject private var scrubThumbnails = ScrubThumbnailsStore()
     @State private var videoHeight = 0          // metadata line: encoded height (2160 -> "4K")
     @State private var audioCodec = ""          // metadata line: active audio codec (e.g. "eac3")
     @State private var isHDR = false            // metadata line: HDR/DV detected (sig-peak > 1)
@@ -92,6 +94,7 @@ struct TVPlayerView: View {
     // the passed url/title/meta in onAppear so the first load is unchanged.
     @State private var curURL: URL?
     @State private var curHeaders: [String: String]?   // the playing stream's required HTTP headers
+    @State private var curTrickplayManifestURL: URL?
     @State private var curTitle: String = ""
     @State private var curMeta: PlaybackMeta?
     // Next-episode preload: fetched + ranked in the background mid-episode so auto-advance is instant.
@@ -136,6 +139,13 @@ struct TVPlayerView: View {
 
     private var controlsHidden: Bool { !showInfo && !showOptions && !loadFailed }
 
+    private func resolvedTrickplayManifestURL(streamManifestURL: URL?, meta: PlaybackMeta?) -> URL? {
+        let generated = TrickplayManifestURLBuilder.makeURL(for: meta)
+        let resolved = streamManifestURL ?? generated
+        plog.debug("trickplay resolve stream=\(streamManifestURL?.absoluteString ?? "nil", privacy: .public) generated=\(generated?.absoluteString ?? "nil", privacy: .public) resolved=\(resolved?.absoluteString ?? "nil", privacy: .public) libraryId=\(meta?.libraryId ?? "nil", privacy: .public) videoId=\(meta?.videoId ?? "nil", privacy: .public)")
+        return resolved
+    }
+
     var body: some View {
         ZStack(alignment: .bottom) {
             Color.black.ignoresSafeArea()
@@ -164,7 +174,8 @@ struct TVPlayerView: View {
                                         videoId: m.videoId, url: u.absoluteString, title: curTitle,
                                         season: m.season, episode: m.episode, name: m.name,
                                         poster: m.poster, type: m.type, qualityText: curHint,
-                                        torrent: curIsTorrent, savedAt: Date(), headers: curHeaders),
+                                        torrent: curIsTorrent, savedAt: Date(), headers: curHeaders,
+                                        trickplayManifestURL: curTrickplayManifestURL?.absoluteString),
                                         profileID: ProfileStore.shared.activeID)
                                 }
                             }
@@ -241,8 +252,12 @@ struct TVPlayerView: View {
         .onAppear {
             if curURL == nil {   // seed from initial request
                 curURL = url; curTitle = title; curMeta = meta
-                curIsTorrent = torrent; curHeaders = headers; curIsLive = initialLiveMode
+                curIsTorrent = torrent; curHeaders = headers
+                curTrickplayManifestURL = resolvedTrickplayManifestURL(streamManifestURL: trickplayManifestURL,
+                                                                        meta: curMeta)
+                curIsLive = initialLiveMode
             }
+            scrubThumbnails.configure(trickplayManifestURL: curTrickplayManifestURL, headers: curHeaders)
             if curHint == nil { curHint = sourceHint }
             if curBinge == nil { curBinge = bingeGroup }
             startStallWatchdog()
@@ -519,13 +534,7 @@ struct TVPlayerView: View {
                     // control row is unreachable for live (see vertical()), so this stays presentation-only.
                     liveIndicator
                 } else {
-                    HStack(spacing: Theme.Space.md) {
-                        Text(timeString(scrubbing ? scrubTarget : currentTime)).font(.callout.monospacedDigit())
-                            .foregroundStyle(scrubbing ? Theme.Palette.accent : Theme.Palette.textPrimary)
-                        scrubber
-                        Text(timeString(duration)).font(.callout.monospacedDigit())
-                            .foregroundStyle(Theme.Palette.textSecondary)
-                    }
+                    trickplayControls
                 }
                 ZStack {
                     HStack(spacing: Theme.Space.md) {
@@ -557,6 +566,59 @@ struct TVPlayerView: View {
             .background(LinearGradient(colors: [.clear, .black.opacity(0.9)], startPoint: .top, endPoint: .bottom))
         }
         .transition(.opacity)
+    }
+
+    private var trickplayControls: some View {
+        let shown = scrubbing ? scrubTarget : currentTime
+        let frac = duration > 0 ? min(1, max(0, shown / duration)) : 0
+        let sideWidth: CGFloat = 82
+        let spacing = Theme.Space.md
+        let bubbleWidth: CGFloat = 480
+        let bubbleHeight: CGFloat = 270
+        return GeometryReader { geo in
+            let scrubWidth = max(1, geo.size.width - sideWidth * 2 - spacing * 2)
+            let knobCenter = sideWidth + spacing + scrubWidth * frac
+            ZStack(alignment: .bottomLeading) {
+                if scrubbing, let image = scrubThumbnails.image {
+                    trickplayBubble(image, time: shown)
+                        .offset(x: min(max(0, knobCenter - bubbleWidth / 2), max(0, geo.size.width - bubbleWidth)), y: -42)
+                        .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
+                }
+                HStack(spacing: spacing) {
+                    Text(timeString(shown)).font(.callout.monospacedDigit())
+                        .foregroundStyle(scrubbing ? Theme.Palette.accent : Theme.Palette.textPrimary)
+                        .frame(width: sideWidth, alignment: .leading)
+                    scrubber
+                    Text(timeString(duration)).font(.callout.monospacedDigit())
+                        .foregroundStyle(Theme.Palette.textSecondary)
+                        .frame(width: sideWidth, alignment: .trailing)
+                }
+                .frame(maxHeight: .infinity, alignment: .bottom)
+            }
+            .animation(.easeOut(duration: 0.12), value: scrubThumbnails.image)
+        }
+        .frame(height: scrubbing && scrubThumbnails.image != nil ? bubbleHeight + 26 : 28)
+    }
+
+    private func trickplayBubble(_ image: UIImage, time: Double) -> some View {
+        let bubbleWidth: CGFloat = 480
+        let bubbleHeight: CGFloat = 270
+        return VStack(spacing: 6) {
+            Image(uiImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: bubbleWidth, height: bubbleHeight)
+                .background(.black)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            Text(timeString(time))
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(Theme.Palette.textPrimary)
+        }
+        .padding(6)
+        .background(.black.opacity(0.78), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .stroke(Theme.Palette.textPrimary.opacity(0.18), lineWidth: 1))
+        .shadow(color: .black.opacity(0.45), radius: 12, y: 6)
     }
 
     /// Seekable ember bar with a knob. When the scrubber row is focused it thickens; while scrubbing it
@@ -882,6 +944,9 @@ struct TVPlayerView: View {
         curIsLive = isLiveMeta(curMeta) && !stream.isTorrent
         curBinge = stream.behaviorHints?.bingeGroup
         curHeaders = stream.requestHeaders
+        curTrickplayManifestURL = resolvedTrickplayManifestURL(streamManifestURL: stream.trickplayManifestURL,
+                                    meta: curMeta)
+        scrubThumbnails.configure(trickplayManifestURL: curTrickplayManifestURL, headers: curHeaders)
         sourceHops = 0; exhaustedURLs = []   // a deliberate pick resets the failover budget (failover restores it)
         recoveryDeadline?.cancel(); recoveryDeadline = nil   // fresh attempt re-arms the overall recovery cap
         torrentWarmupsUsed = 0; torrentStatus = nil; stallRecoveries = 0
@@ -1520,6 +1585,9 @@ struct TVPlayerView: View {
             curBinge = pre.bingeGroup
             curIsTorrent = pre.stream.isTorrent
             curHeaders = pre.stream.requestHeaders
+            curTrickplayManifestURL = resolvedTrickplayManifestURL(streamManifestURL: pre.stream.trickplayManifestURL,
+                                                                    meta: newMeta)
+            scrubThumbnails.configure(trickplayManifestURL: curTrickplayManifestURL, headers: curHeaders)
             curIsLive = isLiveMeta(newMeta) && !pre.stream.isTorrent
             torrentWarmupsUsed = 0; torrentStatus = nil
             stallRecoveries = 0
@@ -1576,6 +1644,9 @@ struct TVPlayerView: View {
                     // manual-nav case: episodes panel, Prev, an early Next) this leaves the live engine
                     // untouched instead of cold-recreating it. Mirrors switchStream's different-hash guard.
                     if let oldHash = leavingHash, oldHash != s.infoHash?.lowercased() { closeTorrent(hash: oldHash) }
+                    curTrickplayManifestURL = resolvedTrickplayManifestURL(streamManifestURL: s.trickplayManifestURL,
+                                                                            meta: newMeta)
+                    scrubThumbnails.configure(trickplayManifestURL: curTrickplayManifestURL, headers: curHeaders)
                     core.loadEnginePlayer(for: s)
                     prepareTorrent(s)                                  // no-op for direct / debrid URLs
                     curURL = u
@@ -1775,6 +1846,7 @@ struct TVPlayerView: View {
         }
         lastScrubAt = now
         scrubTarget = min(duration, max(0, scrubTarget + Double(dir) * scrubStep))
+        scrubThumbnails.show(time: scrubTarget)
         flashControls()
         scheduleScrubCommit()
     }
@@ -1794,11 +1866,17 @@ struct TVPlayerView: View {
         scrubbing = false
         coordinator.player?.seek(to: scrubTarget)
         currentTime = scrubTarget; lastSaved = scrubTarget
+        scrubThumbnails.clear()
         flashControls()
     }
     private func commitScrubIfNeeded() { if scrubbing { commitScrub() } }
     /// Discard the in-progress scrub preview and keep playing where we are (Menu while scrubbing).
-    private func cancelScrub() { scrubCommit?.cancel(); scrubbing = false; flashControls() }
+    private func cancelScrub() {
+        scrubCommit?.cancel()
+        scrubbing = false
+        scrubThumbnails.clear()
+        flashControls()
+    }
 
     /// Reveal the bar from a hidden state, selecting Play, and restart the auto-hide timer.
     private func showControls() {
