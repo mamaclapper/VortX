@@ -22,13 +22,30 @@ final class ThemeManager: ObservableObject {
 
     @Published var accentID: String { didSet { UserDefaults.standard.set(accentID, forKey: Self.accentKey) } }
     @Published var oled: Bool { didSet { UserDefaults.standard.set(oled, forKey: Self.oledKey) } }
+    /// UI text scale, 0.80 to 1.40. @Published so a change repaints the whole app LIVE (the
+    /// screens observe ThemeManager), the same path the accent uses; Theme.Typography reads it
+    /// per render. Static-let typography never updated because tvOS "Restart App" can't relaunch
+    /// the process, so the frozen sizes stuck.
+    @Published var textScale: Double { didSet { UserDefaults.standard.set(textScale, forKey: Self.textScaleKey) } }
+
+    static let textScaleRange: ClosedRange<Double> = 0.80...1.40
+    static let textScaleStep: Double = 0.05
 
     private static let accentKey = "stremiox.theme.accent"
     private static let oledKey = "stremiox.theme.oled"
+    private static let textScaleKey = "stremiox.theme.textScale"
 
     private init() {
         accentID = UserDefaults.standard.string(forKey: Self.accentKey) ?? "ember"
         oled = UserDefaults.standard.bool(forKey: Self.oledKey)
+        let saved = UserDefaults.standard.object(forKey: Self.textScaleKey) as? Double
+        textScale = saved.map { min(max($0, Self.textScaleRange.lowerBound), Self.textScaleRange.upperBound) } ?? 1.0
+    }
+
+    /// Nudge the text scale one step within range (Settings +/- buttons).
+    func adjustTextScale(_ direction: Int) {
+        let next = (textScale + Double(direction) * Self.textScaleStep)
+        textScale = (min(max(next, Self.textScaleRange.lowerBound), Self.textScaleRange.upperBound) * 100).rounded() / 100
     }
 
     /// Eight curated accents. Ember is the default and matches the original ember design.

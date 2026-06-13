@@ -15,6 +15,49 @@ enum StremioServer {
     }
     static var isCustom: Bool { base != embedded }
 
+    /// Whether the embedded server can proxy (the Lite build ships no node server, so it can't).
+    static var canProxy: Bool {
+        #if STREMIOX_NO_EMBEDDED_SERVER
+        return false
+        #else
+        return true
+        #endif
+    }
+
+    /// Route a header-gated HTTP(S) stream through the embedded server's `/proxy/` endpoint, the
+    /// same path official Stremio uses for `notWebReady` add-on streams. The server fetches each
+    /// request (and every HLS variant / segment, which it rewrites to come back through the proxy)
+    /// applying the add-on's declared headers, then serves it to libmpv over plain loopback. This
+    /// is what makes picky CDNs (e.g. ok.ru behind the KhmerDub add-on) play: their playlists and
+    /// segments are fetched server-side with the right Referer / User-Agent and over a modern HTTP
+    /// stack, which libmpv's own ffmpeg fetch cannot reproduce.
+    ///
+    /// Returns nil (caller falls back to the direct URL + mpv headers) when proxying isn't possible:
+    /// the Lite build, a custom remote server, a torrent/local URL, or a non-HTTP URL.
+    /// Server-side route format (from server.js): `/proxy/d={origin}&h={Name:Value}.../{path}{?query}`.
+    static func proxiedURL(for streamURL: URL, headers: [String: String]) -> URL? {
+        guard canProxy, !isCustom, !headers.isEmpty,
+              let scheme = streamURL.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = streamURL.host else { return nil }
+        // Never proxy the local torrent server back through itself.
+        if host == "127.0.0.1" || host == "localhost" { return nil }
+
+        var origin = "\(scheme)://\(host)"
+        if let port = streamURL.port { origin += ":\(port)" }
+
+        // querystring keys the server expects: d = destination origin, repeated h = "Name:Value".
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&=+/?:")   // encode separators so the qs parses cleanly
+        func enc(_ s: String) -> String { s.addingPercentEncoding(withAllowedCharacters: allowed) ?? s }
+
+        var qs = "d=\(enc(origin))"
+        for (name, value) in headers { qs += "&h=\(enc("\(name):\(value)"))" }
+
+        let path = streamURL.path.isEmpty ? "/" : streamURL.path
+        let search = streamURL.query.map { "?\($0)" } ?? ""
+        return URL(string: "\(embedded)/proxy/\(qs)\(path)\(search)")
+    }
+
     /// Persist a custom server URL (nil/empty → revert to the embedded server). Normalizes the
     /// input (adds http:// if missing, trims a trailing slash). Returns the stored value.
     @discardableResult

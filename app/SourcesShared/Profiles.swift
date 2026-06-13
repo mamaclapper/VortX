@@ -32,6 +32,7 @@ struct UserProfile: Codable, Identifiable, Equatable {
         var subSize: String
         var subColor: String
         var subBackground: String
+        var subSizeScale: Double? = nil   // optional so older rosters decode
     }
 
     var hasPin: Bool { !(pin ?? "").isEmpty }
@@ -232,7 +233,8 @@ final class ProfileStore: ObservableObject {
             subFont: d.string(forKey: SubtitleStyle.Key.font) ?? SubtitleStyle.defaultFont,
             subSize: d.string(forKey: SubtitleStyle.Key.size) ?? SubtitleStyle.defaultSize,
             subColor: d.string(forKey: SubtitleStyle.Key.color) ?? SubtitleStyle.defaultColor,
-            subBackground: d.string(forKey: SubtitleStyle.Key.background) ?? SubtitleStyle.defaultBackground)
+            subBackground: d.string(forKey: SubtitleStyle.Key.background) ?? SubtitleStyle.defaultBackground,
+            subSizeScale: d.object(forKey: SubtitleStyle.Key.sizeScale) as? Double ?? 1.0)
     }
 
     /// Write `profile`'s playback preferences into the flat UserDefaults keys that
@@ -248,13 +250,17 @@ final class ProfileStore: ObservableObject {
             d.set(p.subSize, forKey: SubtitleStyle.Key.size)
             d.set(p.subColor, forKey: SubtitleStyle.Key.color)
             d.set(p.subBackground, forKey: SubtitleStyle.Key.background)
+            d.set(p.subSizeScale ?? 1.0, forKey: SubtitleStyle.Key.sizeScale)
         } else {
             for key in [TrackPreferences.Key.audio, TrackPreferences.Key.subtitle,
                         TrackPreferences.Key.forced, SubtitleStyle.Key.font, SubtitleStyle.Key.size,
-                        SubtitleStyle.Key.color, SubtitleStyle.Key.background] {
+                        SubtitleStyle.Key.color, SubtitleStyle.Key.background, SubtitleStyle.Key.sizeScale] {
                 d.removeObject(forKey: key)
             }
         }
+        // Stream scores embed the preferred audio language (the language demotion), so a profile
+        // switch that changes it must drop the memoized scores.
+        StreamRanking.invalidateCaches()
     }
 
     /// Mirror of captureTheme for playback preferences: Settings and the in-player options write

@@ -148,6 +148,14 @@ enum StreamRanking {
         if boundedMatch(text, "3d") || boundedMatch(text, #"hsbs|half[ .\-_]?sbs|sbs[ .\-_]?3d"#) { score -= 2000 }
         // Hardcoded subtitle rips are watchable but defaced; nudge below clean peers.
         if text.contains("korsub") || boundedMatch(text, "hc") { score -= 200 }
+        // Preferred-language demotion: a release that clearly advertises a foreign audio
+        // language (and no preferred one) sinks 5,000 points, enough to fall below a
+        // same-cache, same-type peer one resolution tier down. So a 4K labelled Chinese
+        // loses to a 1080p English when the viewer's audio preference is English, which is
+        // exactly the reported case. Smaller than the cached (+8000) and tier (15000) gaps,
+        // so cache and the source-type order still win first. Untagged releases (most
+        // English originals) are never penalised.
+        score += languageScore(text)
         // Cached dominates WITHIN its tier: +8000 clears the maximum quality spread (~5800), so
         // a cached stream always beats an uncached one of the same source type, which is the
         // "uncached debrid kept winning" fix. It stays SMALLER than the 15k tier gap on purpose:
@@ -166,6 +174,11 @@ enum StreamRanking {
         if type == .torrent, let seeders = seederCount(text) {
             score += seeders == 0 ? -800 : min(seeders * 8, 400)
         }
+        // Fake-quality guard: a file far too small for the resolution it claims is mislabelled
+        // (Comet and other raw-passthrough add-ons surface these; a 50 MB "4K" has been seen
+        // labelled and auto-picked as best). Only fires when the size is KNOWN and implausibly
+        // small for the claimed resolution, so a genuinely small low-res episode is never hit.
+        if implausibleForResolution(text) { score -= 100_000 }
         // Theatrical rips and fake "quality" releases rank below every legitimate stream of any
         // tier, cached or not (the legit ceiling is ~60k). The shift is uniform, so if only
         // junk exists the least-bad junk still wins.
@@ -204,6 +217,67 @@ enum StreamRanking {
         if boundedMatch(text, "ts") { return "TS" }
         if boundedMatch(text, "scr") { return "SCR" }
         return nil
+    }
+
+    /// Audio-language markers per ISO code. Full words use substring matching; short codes and
+    /// CJK glyphs are checked too. Deliberately conservative: only strong, unambiguous tokens,
+    /// so an untagged English release is never flagged foreign.
+    private static let langTokens: [String: [String]] = [
+        "en": ["english", "🇬🇧", "🇺🇸"],
+        "es": ["spanish", "español", "espanol", "castellano", "latino"],
+        "fr": ["french", "français", "francais", "truefrench", "vostfr"],
+        "de": ["german", "deutsch"],
+        "it": ["italian", "italiano"],
+        "pt": ["portuguese", "português", "portugues", "dublado", "legendado"],
+        "hi": ["hindi", "🇮🇳"],
+        "ja": ["japanese", "日本", "日本語"],
+        "ko": ["korean", "한국", "korsub"],
+        "zh": ["chinese", "mandarin", "cantonese", "中文", "中字", "国语", "粤语", "简体", "繁體"],
+        "ar": ["arabic", "العربية"],
+        "ru": ["russian", "русск"],
+    ]
+
+    /// A release that explicitly claims a non-preferred audio language (and no preferred one)
+    /// is demoted so the viewer's language wins over a higher resolution. "multi"/"dual"/"multi
+    /// audio" count as carrying the preferred track, so they are never penalised.
+    static func languageScore(_ text: String) -> Int {
+        let preferred = Set(TrackPreferences.current.audioLanguages)
+        guard !preferred.isEmpty else { return 0 }
+        if text.contains("multi") || text.contains("dual") { return 0 }
+        func claims(_ code: String) -> Bool {
+            (langTokens[code] ?? []).contains { token in
+                token.count <= 3 ? boundedMatch(text, token) : text.contains(token)
+            }
+        }
+        if preferred.contains(where: claims) { return 0 }   // carries a preferred language
+        let foreign = langTokens.keys.filter { !preferred.contains($0) }
+        return foreign.contains(where: claims) ? -5000 : 0
+    }
+
+    /// True when the stream advertises a resolution but its KNOWN file size is far too small to
+    /// be real at that resolution (a mislabelled or fake file). Conservative floors, well below
+    /// any legitimate release, so real content is never caught; returns false when no size is
+    /// parseable (we can't judge) or for sub-1080p where small files are normal.
+    static func implausibleForResolution(_ text: String) -> Bool {
+        let gb = sizeGB(text)
+        let mb = gb > 0 ? gb * 1024 : sizeMB(text)
+        guard mb > 0 else { return false }   // unknown size: cannot judge
+        if text.contains("2160") || boundedMatch(text, "4k") || boundedMatch(text, "uhd") {
+            return mb < 250   // a real 4K movie is multi-GB; even a 4K episode clears this easily
+        }
+        if boundedMatch(text, "1080p?") {
+            return mb < 50    // a 1080p feature under 50 MB is not real video
+        }
+        return false           // 720p and below: small files are legitimately common
+    }
+
+    /// File size in MB parsed from the add-on's stream text, when given in MB (not GB).
+    private static func sizeMB(_ t: String) -> Double {
+        guard let m = firstMatch(t, #"(\d+(?:\.\d+)?)\s*m(i)?b"#) else { return 0 }
+        let digits = m.lowercased()
+            .replacingOccurrences(of: "mib", with: "").replacingOccurrences(of: "mb", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        return Double(digits) ?? 0
     }
 
     /// Seeder count parsed from the stream text, where torrent add-ons print it

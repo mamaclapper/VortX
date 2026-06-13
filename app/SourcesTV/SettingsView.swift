@@ -14,6 +14,7 @@ struct SettingsView: View {
     @State private var editingProfile: UserProfile?
     @AppStorage(SubtitleStyle.Key.font) private var subFont = SubtitleStyle.defaultFont
     @AppStorage(SubtitleStyle.Key.size) private var subSize = SubtitleStyle.defaultSize
+    @AppStorage(SubtitleStyle.Key.sizeScale) private var subSizeScale = 1.0
     @AppStorage(SubtitleStyle.Key.color) private var subColor = SubtitleStyle.defaultColor
     @AppStorage(SubtitleStyle.Key.background) private var subBackground = SubtitleStyle.defaultBackground
     @AppStorage(TrackPreferences.Key.forced) private var prefForced = TrackPreferences.ForcedPolicy.forced.rawValue
@@ -21,7 +22,6 @@ struct SettingsView: View {
     @AppStorage(TrackPreferences.Key.subtitle) private var prefSubLang = TrackPreferences.deviceLanguages.first ?? "en"
     @AppStorage(PlaybackSettings.Key.directLinksOnly) private var directLinksOnly = false
     @AppStorage(PerformanceMode.overrideKey) private var perfMode = "auto"
-    @AppStorage(Theme.TextScale.key) private var textScale = "m"
     @ObservedObject private var sourcePrefs = SourcePreferences.shared
 
     var body: some View {
@@ -49,7 +49,7 @@ struct SettingsView: View {
         // flat-key change back into it (the captureTheme pattern, RootTabView does the same for
         // the theme). The equality guard inside capturePlayback stops a profile switch's own
         // flat-key writes from echoing back as roster edits.
-        .onChange(of: prefAudioLang) { ProfileStore.shared.capturePlayback() }
+        .onChange(of: prefAudioLang) { StreamRanking.invalidateCaches(); ProfileStore.shared.capturePlayback() }
         .onChange(of: prefSubLang) { ProfileStore.shared.capturePlayback() }
         .onChange(of: prefForced) { ProfileStore.shared.capturePlayback() }
         .onChange(of: subFont) { ProfileStore.shared.capturePlayback() }
@@ -298,8 +298,11 @@ struct SettingsView: View {
             Text("Tone-maps HDR and Dolby Vision to SDR. Turn this on only if 4K Dolby Vision remuxes look washed out, green, or purple on your TV; most TVs should leave it off.")
                 .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
 
-            choiceRow("App text size", Theme.TextScale.choices.map { ($0.id, $0.label) }, selection: $textScale)
-            Text("Scales the text across the app's screens. Takes effect after a relaunch.")
+            stepperRow("App text size", value: theme.textScale,
+                       range: ThemeManager.textScaleRange,
+                       onMinus: { theme.adjustTextScale(-1) },
+                       onPlus: { theme.adjustTextScale(1) })
+            Text("Makes every screen's text larger or smaller. Changes apply instantly.")
                 .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
 
             choiceRow("Performance", [("auto", "Auto"), ("full", "Full"), ("reduced", "Reduced")], selection: $perfMode)
@@ -381,6 +384,10 @@ struct SettingsView: View {
         section("Subtitle Style") {
             choiceRow("Font", SubtitleStyle.fonts.map { ($0.id, $0.label) }, selection: $subFont)
             choiceRow("Size", SubtitleStyle.sizes.map { ($0.id, $0.label) }, selection: $subSize)
+            stepperRow("Fine size", value: subSizeScale,
+                       range: SubtitleStyle.sizeScaleRange,
+                       onMinus: { adjustSubScale(-1) },
+                       onPlus: { adjustSubScale(1) })
             choiceRow("Color", SubtitleStyle.colors.map { ($0.id, $0.label) }, selection: $subColor)
             choiceRow("Background", SubtitleStyle.backgrounds.map { ($0.id, $0.label) }, selection: $subBackground)
             Text("Styles the built-in player's subtitles. Pick which subtitle track to show from the player while watching.")
@@ -403,6 +410,36 @@ struct SettingsView: View {
         }
         // Each row is its own focus section so Down moves between stacked rows (e.g. Size ->
         // Color -> Background) without first leveling onto the chip beneath the focused one.
+        .focusSection()
+    }
+
+    private func adjustSubScale(_ direction: Int) {
+        let next = subSizeScale + Double(direction) * SubtitleStyle.sizeScaleStep
+        let clamped = min(max(next, SubtitleStyle.sizeScaleRange.lowerBound), SubtitleStyle.sizeScaleRange.upperBound)
+        subSizeScale = (clamped * 100).rounded() / 100
+        ProfileStore.shared.capturePlayback()
+    }
+
+    /// A label with minus / value / plus controls, for continuous settings (text and subtitle size).
+    private func stepperRow(_ label: String, value: Double, range: ClosedRange<Double>,
+                            onMinus: @escaping () -> Void, onPlus: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
+            Text(label).font(Theme.Typography.cardTitle).foregroundStyle(Theme.Palette.textPrimary)
+            HStack(spacing: Theme.Space.md) {
+                Button(action: onMinus) { Image(systemName: "minus") }
+                    .buttonStyle(ChipButtonStyle(selected: false))
+                    .disabled(value <= range.lowerBound + 0.001)
+                    .opacity(value <= range.lowerBound + 0.001 ? 0.3 : 1)
+                Text("\(Int((value * 100).rounded()))%")
+                    .font(Theme.Typography.body.monospacedDigit())
+                    .foregroundStyle(Theme.Palette.textPrimary)
+                    .frame(minWidth: 90)
+                Button(action: onPlus) { Image(systemName: "plus") }
+                    .buttonStyle(ChipButtonStyle(selected: false))
+                    .disabled(value >= range.upperBound - 0.001)
+                    .opacity(value >= range.upperBound - 0.001 ? 0.3 : 1)
+            }
+        }
         .focusSection()
     }
 

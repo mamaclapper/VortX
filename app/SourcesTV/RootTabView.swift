@@ -109,24 +109,35 @@ struct RootView: View {
 struct RootTabView: View {
     @EnvironmentObject private var account: StremioAccount
     @EnvironmentObject private var theme: ThemeManager
+    @State private var selection = 0
+    // Per-tab identity token. Each tab owns its own NavigationStack whose pushed pages persist
+    // while the tab stays alive (tvOS keeps tabs mounted). Bumping the token of the tab you LEAVE
+    // changes that tab's view identity, so the next time you open it SwiftUI rebuilds it fresh at
+    // its root instead of re-showing the detail page you had pushed (the "Search still shows the
+    // series I opened" bug). Cheap because the data lives in CoreBridge, not in the view.
+    @State private var resetTokens = [Int](repeating: 0, count: 6)
 
     var body: some View {
-        TabView {
-            HomeView()
-                .tabItem { Label("Home", systemImage: "house.fill") }
-            DiscoverView()
-                .tabItem { Label("Discover", systemImage: "safari.fill") }
-            LibraryView()
-                .tabItem { Label("Library", systemImage: "books.vertical.fill") }
-            AddonsView()
-                .tabItem { Label("Add-ons", systemImage: "puzzlepiece.extension.fill") }
-            NavigationStack { SearchView() }
-                .tabItem { Label("Search", systemImage: "magnifyingglass") }
-            SettingsView()
-                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+        TabView(selection: $selection) {
+            HomeView().id(resetTokens[0])
+                .tabItem { Label("Home", systemImage: "house.fill") }.tag(0)
+            DiscoverView().id(resetTokens[1])
+                .tabItem { Label("Discover", systemImage: "safari.fill") }.tag(1)
+            LibraryView().id(resetTokens[2])
+                .tabItem { Label("Library", systemImage: "books.vertical.fill") }.tag(2)
+            AddonsView().id(resetTokens[3])
+                .tabItem { Label("Add-ons", systemImage: "puzzlepiece.extension.fill") }.tag(3)
+            NavigationStack { SearchView() }.id(resetTokens[4])
+                .tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(4)
+            SettingsView().id(resetTokens[5])
+                .tabItem { Label("Settings", systemImage: "gearshape.fill") }.tag(5)
         }
         .tint(theme.accent)
         .onAppear { applyTabBarAccent() }
+        // Reset the tab being LEFT to its root, so returning to it lands on the root page.
+        .onChange(of: selection) { old, _ in
+            if old >= 0, old < resetTokens.count { resetTokens[old] += 1 }
+        }
         // The active profile owns the theme: mirror Settings changes into it so they survive a switch.
         .onChange(of: theme.accentID) { applyTabBarAccent(); ProfileStore.shared.captureTheme() }
         .onChange(of: theme.oled) { applyTabBarAccent(); ProfileStore.shared.captureTheme() }

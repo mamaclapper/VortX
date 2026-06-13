@@ -49,6 +49,7 @@ struct TVPlayerView: View {
     @State private var audioDelay: Double = 0          // manual audio sync, seconds
     @AppStorage(SubtitleStyle.Key.font) private var subFont = SubtitleStyle.defaultFont
     @AppStorage(SubtitleStyle.Key.size) private var subSize = SubtitleStyle.defaultSize
+    @AppStorage(SubtitleStyle.Key.sizeScale) private var subSizeScale = 1.0
     @AppStorage(SubtitleStyle.Key.color) private var subColor = SubtitleStyle.defaultColor
     @AppStorage(SubtitleStyle.Key.background) private var subBackground = SubtitleStyle.defaultBackground
     @State private var optionRow = 0                   // highlighted row in the options panel
@@ -133,7 +134,7 @@ struct TVPlayerView: View {
             Color.black.ignoresSafeArea()
 
             MPVMetalPlayerView(coordinator: coordinator)
-                .play(url, headers: headers)
+                .play(initialPlayback.url, headers: initialPlayback.headers)
                 .live(initialLiveMode)
                 .onPropertyChange { _, name, data in
                     switch name {
@@ -269,6 +270,7 @@ struct TVPlayerView: View {
             hideTask?.cancel(); loadTimeout?.cancel(); autoRetryTask?.cancel(); skipFetchTask?.cancel(); stallWatchdog?.cancel()
             saveProgress(at: currentTime)
             core.reportProgress(timeSeconds: currentTime, durationSeconds: duration)   // flush final position to the engine
+            if let hash = currentTorrentHash { closeTorrent(hash: hash) }   // free the engine when the player closes
             UIApplication.shared.isIdleTimerDisabled = false   // let the screensaver resume once the player closes
         }
     }
@@ -619,6 +621,9 @@ struct TVPlayerView: View {
             for f in SubtitleStyle.fonts { rows.append(OptionRow(label: f.label, isSelected: subFont == f.id) { setSubtitleFont(f.id) }) }
             rows.append(OptionRow(label: "Size", isHeader: true))
             for s in SubtitleStyle.sizes { rows.append(OptionRow(label: s.label, isSelected: subSize == s.id) { setSubtitleSize(s.id) }) }
+            let scalePct = "\(Int((subSizeScale * 100).rounded()))%"
+            rows.append(OptionRow(label: "Smaller  −", detail: scalePct) { adjustSubScale(-1) })
+            rows.append(OptionRow(label: "Bigger  +", detail: scalePct) { adjustSubScale(1) })
             rows.append(OptionRow(label: "Colour", isHeader: true))
             for c in SubtitleStyle.colors { rows.append(OptionRow(label: c.label, isSelected: subColor == c.id) { setSubtitleColor(c.id) }) }
             rows.append(OptionRow(label: "Background", isHeader: true))
@@ -732,7 +737,7 @@ struct TVPlayerView: View {
     private func playerSettingsRows() -> [OptionRow] {
         var rows: [OptionRow] = []
         if !isTorrentPlayback, let url = curURL {
-            let players = ExternalPlayers.installed()
+            let players = ExternalPlayers.menu()
             if !players.isEmpty {
                 rows.append(OptionRow(label: "Play in", isHeader: true))
                 for player in players {
@@ -780,6 +785,18 @@ struct TVPlayerView: View {
         return desc.isEmpty ? "Source" : desc
     }
 
+    /// Hand a stream to mpv, routing header-gated HTTP streams through the embedded server's
+    /// proxy when it can (the official-Stremio path that makes picky CDNs like ok.ru play). The
+    /// server applies the headers and rewrites the HLS playlist, so mpv fetches plain loopback
+    /// and needs no headers of its own; everything else loads directly with mpv-applied headers.
+    private func loadIntoPlayer(_ url: URL, headers: [String: String]?, live: Bool) {
+        if let h = headers, !h.isEmpty, let proxied = StremioServer.proxiedURL(for: url, headers: h) {
+            coordinator.player?.loadFile(proxied, headers: nil, live: live)
+        } else {
+            coordinator.player?.loadFile(url, headers: headers, live: live)
+        }
+    }
+
     /// Switch the playing source in place: reload the picked stream's URL and resume at the current
     /// position (via `resumeSeconds`), so a buffering or low-quality source can be swapped without
     /// leaving the player. Resets the auto-recovery budget for the fresh source.
@@ -791,6 +808,12 @@ struct TVPlayerView: View {
         // closePanel forces the control bar up and teleports the highlight; right for a manual
         // pick, hostile when an automatic hop fires while the viewer is browsing a panel.
         if userInitiated { closePanel() }
+        // Cleanly destroy the torrent engine we're leaving BEFORE starting the next source, so
+        // engines never pile up on the embedded server (the regression that bloated its RSS and
+        // took it offline). A hop into another torrent is fine now that the old one is closed.
+        if let oldHash = currentTorrentHash, oldHash != stream.infoHash?.lowercased() {
+            closeTorrent(hash: oldHash)
+        }
         curURL = newURL
         curIsTorrent = stream.isTorrent
         curIsLive = isLiveMeta(curMeta) && !stream.isTorrent
@@ -803,7 +826,7 @@ struct TVPlayerView: View {
         appliedResume = false
         buffering = true; hasStartedPlaying = false; appliedAutoTracks = false; loadErrorMsg = ""
         autoRetryCount = 0; reconnecting = false; autoRetryTask?.cancel()
-        coordinator.player?.loadFile(newURL, headers: curHeaders, live: curIsLive)
+        loadIntoPlayer(newURL, headers: curHeaders, live: curIsLive)
         startLoadTimeout()
     }
 
@@ -856,6 +879,14 @@ struct TVPlayerView: View {
     }
     private func setSubtitleSize(_ id: String) {
         subSize = id; coordinator.player?.applySubtitleStyle(); ProfileStore.shared.capturePlayback()
+    }
+    private func adjustSubScale(_ direction: Int) {
+        let next = subSizeScale + Double(direction) * SubtitleStyle.sizeScaleStep
+        let clamped = min(max(next, SubtitleStyle.sizeScaleRange.lowerBound), SubtitleStyle.sizeScaleRange.upperBound)
+        subSizeScale = (clamped * 100).rounded() / 100
+        coordinator.player?.applySubtitleStyle()
+        ProfileStore.shared.capturePlayback()
+        if showOptions { panelRows = optionRows }   // refresh the % readout in place
     }
     private func setSubtitleColor(_ id: String) {
         subColor = id; coordinator.player?.applySubtitleStyle(); ProfileStore.shared.capturePlayback()
@@ -1060,7 +1091,7 @@ struct TVPlayerView: View {
         resumeSeconds = currentTime
         appliedResume = false; appliedAutoTracks = false
         buffering = true
-        coordinator.player?.loadFile(curURL ?? url, headers: curHeaders, live: isCurrentLiveStream)
+        loadIntoPlayer(curURL ?? url, headers: curHeaders, live: isCurrentLiveStream)
     }
 
     private func startLoadTimeout() {
@@ -1209,7 +1240,7 @@ struct TVPlayerView: View {
         autoRetryTask?.cancel()
         withAnimation { loadFailed = false }
         buffering = true; hasStartedPlaying = false; appliedResume = false; appliedAutoTracks = false; loadErrorMsg = ""
-        coordinator.player?.loadFile(curURL ?? url, headers: curHeaders, live: isCurrentLiveStream)
+        loadIntoPlayer(curURL ?? url, headers: curHeaders, live: isCurrentLiveStream)
         startLoadTimeout()
     }
 
@@ -1255,6 +1286,15 @@ struct TVPlayerView: View {
 
     private var isCurrentLiveStream: Bool { curIsLive && !isTorrentPlayback }
     private var initialLiveMode: Bool { !torrent && isLiveMeta(meta) }
+
+    /// The first load's URL/headers, proxied through the embedded server when the launch stream
+    /// declares request headers (same routing as loadIntoPlayer, applied to the initial play).
+    private var initialPlayback: (url: URL, headers: [String: String]?) {
+        if let h = headers, !h.isEmpty, let proxied = StremioServer.proxiedURL(for: url, headers: h) {
+            return (proxied, nil)
+        }
+        return (url, headers)
+    }
 
     /// Live content carries the live meta types; everything else keeps VOD behavior. The
     /// id-scheme heuristic (any id the skip service can't parse = live) would misclassify
@@ -1366,6 +1406,7 @@ struct TVPlayerView: View {
     private func play(episode v: CoreVideo) {
         guard let m = curMeta else { return }
         saveProgress(at: currentTime)
+        if let oldHash = currentTorrentHash { closeTorrent(hash: oldHash) }   // release the finished episode's engine
         withAnimation { showOptions = false }
         buffering = true; hasStartedPlaying = false; appliedResume = false
         loadFailed = false; currentTime = 0; duration = 0; lastSaved = -1; resumeSeconds = nil; appliedAutoTracks = false
@@ -1394,7 +1435,7 @@ struct TVPlayerView: View {
             Task {
                 core.loadMeta(type: "series", id: m.libraryId, streamType: "series", streamId: v.id)
                 resumeSeconds = await account.resumeOffset(for: newMeta)
-                coordinator.player?.loadFile(u, headers: curHeaders, live: curIsLive)
+                loadIntoPlayer(u, headers: curHeaders, live: curIsLive)
                 startLoadTimeout()
                 // Hand the stream to the engine Player once its meta_details catches up, so
                 // Continue Watching keeps tracking; harmless if it never matches.
@@ -1433,7 +1474,7 @@ struct TVPlayerView: View {
                     curURL = u
                     curIsLive = isLiveMeta(newMeta) && !s.isTorrent
                     resumeSeconds = await account.resumeOffset(for: newMeta)
-                    coordinator.player?.loadFile(u, headers: curHeaders, live: curIsLive)
+                    loadIntoPlayer(u, headers: curHeaders, live: curIsLive)
                     startLoadTimeout()
                     return
                 }
@@ -1531,6 +1572,25 @@ struct TVPlayerView: View {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = data
         URLSession.shared.dataTask(with: request).resume()
+    }
+
+    /// Tell the embedded server to destroy a torrent engine (GET /{hash}/remove). Each engine
+    /// holds peers, sockets, and a growing disk/RAM cache; leaving them running when we switch
+    /// source, auto-fail over, advance an episode, or close the player piled them up until the
+    /// server's RSS ballooned and it stopped answering (the 0.2.48 "torrents stopped playing,
+    /// server went offline" regression). Symmetric with prepareTorrent's create.
+    private func closeTorrent(hash: String) {
+        let h = hash.lowercased()
+        guard h.count == 40, let url = URL(string: "\(StremioServer.base)/\(h)/remove") else { return }
+        DiagnosticsLog.log("torrent", "remove engine \(h.prefix(8))")
+        URLSession.shared.dataTask(with: url).resume()
+    }
+
+    /// The 40-hex info-hash of the currently playing torrent, or nil for a direct/debrid stream.
+    private var currentTorrentHash: String? {
+        guard let u = curURL, u.port == 11470, u.pathComponents.count >= 2 else { return nil }
+        let hash = u.pathComponents[1]
+        return (hash.count == 40 && hash.allSatisfy(\.isHexDigit)) ? hash : nil
     }
 
     // MARK: - Playback helpers
