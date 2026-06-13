@@ -6,6 +6,12 @@ import UIKit
 #endif
 import os
 
+#if canImport(AppKit)
+typealias ScrubImage = NSImage
+#elseif canImport(UIKit)
+typealias ScrubImage = UIImage
+#endif
+
 struct ScrubThumbnailCue: Hashable {
     let start: Double
     let end: Double
@@ -90,7 +96,7 @@ enum ScrubThumbnailManifestParser {
 
 @MainActor
 final class ScrubThumbnailsStore: ObservableObject {
-    @Published private(set) var image: PlatformImage?
+    @Published private(set) var image: ScrubImage?
     @Published private(set) var available = false
 
     private var trickplayManifestURL: URL?
@@ -100,8 +106,8 @@ final class ScrubThumbnailsStore: ObservableObject {
     private var currentCue: ScrubThumbnailCue?
     private static let log = Logger(subsystem: "com.stremiox.app", category: "trickplay")
 
-    private static let imageCache: NSCache<NSURL, PlatformImage> = {
-        let c = NSCache<NSURL, PlatformImage>()
+    private static let imageCache: NSCache<NSURL, ScrubImage> = {
+        let c = NSCache<NSURL, ScrubImage>()
         c.countLimit = 48
         return c
     }()
@@ -220,14 +226,14 @@ final class ScrubThumbnailsStore: ObservableObject {
         return NSURL(string: cue.imageURL.absoluteString + rect) ?? cue.imageURL as NSURL
     }
 
-    private nonisolated static func loadImage(for cue: ScrubThumbnailCue, headers: [String: String]?) async -> PlatformImage? {
+    private nonisolated static func loadImage(for cue: ScrubThumbnailCue, headers: [String: String]?) async -> ScrubImage? {
         do {
             var request = URLRequest(url: cue.imageURL)
             request.cachePolicy = .returnCacheDataElseLoad
             headers?.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return nil }
-            guard let image = PlatformImage(data: data) else { return nil }
+            guard let image = ScrubImage(data: data) else { return nil }
             guard let rect = cue.rect else { return image }
 #if canImport(AppKit)
             guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
