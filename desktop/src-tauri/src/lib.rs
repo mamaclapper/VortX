@@ -9,6 +9,7 @@
 
 mod engine;
 mod model;
+mod server;
 
 use std::sync::RwLock;
 
@@ -159,6 +160,29 @@ fn engine_get_state(field_json: String) -> String {
     }
 }
 
+/// The embedded streaming server's current state (JSON-tagged `state` + `reason`). The frontend
+/// renders an empty state from this when the server failed to start, and stops filtering out torrent
+/// streams once it is running + listening.
+#[tauri::command]
+fn server_status() -> server::ServerState {
+    server::status()
+}
+
+/// The base URL of the embedded streaming server (`http://127.0.0.1:11470`). The frontend builds the
+/// torrent prime (`POST <base>/<infohash>/create`) and play (`<base>/<infohash>/<fileIdx>`) URLs from
+/// this — the StremioServer-equivalent on desktop.
+#[tauri::command]
+fn server_base_url() -> String {
+    server::base_url()
+}
+
+/// Whether the embedded server is actually accepting connections on the loopback port yet (it spawns
+/// asynchronously and takes a moment to boot). The frontend polls this before relying on the server.
+#[tauri::command]
+fn server_is_listening() -> bool {
+    server::is_listening()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -173,15 +197,38 @@ pub fn run() {
             init_engine(storage_dir, move |json| {
                 let _ = handle.emit("core-event", json);
             });
+
+            // Start the embedded streaming server (bundled node + server.js) on loopback so TORRENT
+            // streams play. Resources are staged next to the binary by fetch-server-deps.sh and
+            // bundled via tauri.conf.json; the server uses a writable cache dir as its HOME.
+            if let Ok(resource_dir) = app.path().resource_dir() {
+                let cache_dir = app
+                    .path()
+                    .app_cache_dir()
+                    .unwrap_or_else(|_| std::env::temp_dir())
+                    .join("stremio-server");
+                server::start(&resource_dir, &cache_dir);
+            } else {
+                eprintln!("StremioX: resource dir unavailable; embedded server disabled");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             engine_schema_version,
             engine_dispatch,
-            engine_get_state
+            engine_get_state,
+            server_status,
+            server_base_url,
+            server_is_listening
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running the StremioX desktop app");
+        .build(tauri::generate_context!())
+        .expect("error while running the StremioX desktop app")
+        .run(|_app_handle, event| {
+            // Never orphan the node child: force-kill it when the app is exiting.
+            if let tauri::RunEvent::Exit = event {
+                server::stop();
+            }
+        });
 }
 
 #[cfg(test)]
@@ -223,6 +270,112 @@ mod tests {
         assert!(
             board.contains("\"poster\""),
             "board should populate with real catalog items (posters) from the default add-ons"
+        );
+    }
+
+    /// Contract test for the desktop **detail page** (src/detail.ts + streamRanking.ts): load
+    /// `meta_details` for a known movie the same way the frontend does, and assert the JSON carries
+    /// the exact fields the detail UI reads — the per-add-on `streams[].request.base` grouping key,
+    /// the `metaItems` envelope, and the hero `logo` / `links` (genres + rating). Hits the network,
+    /// so it is `#[ignore]`d like the board test. Run it with:
+    ///   cargo test --manifest-path desktop/src-tauri/Cargo.toml meta_details_shape_for_detail_page -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn meta_details_shape_for_detail_page() {
+        let dir = std::env::temp_dir()
+            .join("stremiox-engine-detail-smoke")
+            .to_string_lossy()
+            .into_owned();
+        let _ = std::fs::remove_dir_all(&dir);
+        init_engine(dir, |_json| {});
+
+        // The Matrix (tt0133093): a stable, default-add-on (Cinemeta) movie. Same Load envelope the
+        // frontend's openDetail() dispatches.
+        engine_dispatch(
+            r#"{"field":"meta_details","action":{"action":"Load","args":{"model":"MetaDetails","args":{"metaPath":{"resource":"meta","type":"movie","id":"tt0133093","extra":[]},"guessStream":true,"streamPath":null}}}}"#.to_owned(),
+        );
+
+        let mut md = String::from("null");
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            md = engine_get_state(r#""meta_details""#.to_owned());
+            // Wait until the meta has resolved AND at least one stream group request exists.
+            if md.contains("\"logo\"") && md.contains("\"streams\"") {
+                break;
+            }
+        }
+        println!("meta_details ({} bytes): {}", md.len(), &md[..md.len().min(1200)]);
+
+        // The detail page parses these exact keys; if the engine ever renames them the UI breaks.
+        assert!(md.contains("\"metaItems\""), "meta_details must expose metaItems");
+        assert!(md.contains("\"streams\""), "meta_details must expose streams");
+        assert!(md.contains("\"links\""), "meta carries links (genres + imdb rating)");
+        assert!(
+            md.contains("\"base\"") && md.contains("\"path\""),
+            "every resource request exposes base (the per-add-on grouping key) + path"
+        );
+    }
+
+    /// Contract test for the desktop **series detail page** (the series branch in src/detail.ts):
+    /// load a known series and assert the meta carries the `videos` array with the season/episode
+    /// fields the episode list reads, then load ONE episode's streams the way the frontend does
+    /// (the same MetaDetails Load envelope, but with a `streamPath` scoped to the episode's video id)
+    /// and assert the per-add-on `streams[].request.base` grouping shape comes back. Hits the
+    /// network, so it is `#[ignore]`d like the others. Run it with:
+    ///   cargo test --manifest-path desktop/src-tauri/Cargo.toml episode_streams_shape_for_series_page -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn episode_streams_shape_for_series_page() {
+        let dir = std::env::temp_dir()
+            .join("stremiox-engine-series-smoke")
+            .to_string_lossy()
+            .into_owned();
+        let _ = std::fs::remove_dir_all(&dir);
+        init_engine(dir, |_json| {});
+
+        // Breaking Bad (tt0903747): a stable, default-add-on (Cinemeta) series. Same meta Load the
+        // series page dispatches on open (no stream path yet — we just want the episode list).
+        engine_dispatch(
+            r#"{"field":"meta_details","action":{"action":"Load","args":{"model":"MetaDetails","args":{"metaPath":{"resource":"meta","type":"series","id":"tt0903747","extra":[]},"guessStream":true,"streamPath":null}}}}"#.to_owned(),
+        );
+
+        let mut md = String::from("null");
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            md = engine_get_state(r#""meta_details""#.to_owned());
+            // Wait until the series meta has resolved with its episode list.
+            if md.contains("\"videos\"") && md.contains("\"season\"") {
+                break;
+            }
+        }
+        println!("series meta_details ({} bytes): {}", md.len(), &md[..md.len().min(1200)]);
+
+        // The series page's episode list reads these exact video fields (season/episode + id).
+        assert!(md.contains("\"videos\""), "series meta must expose the videos (episodes) array");
+        assert!(md.contains("\"season\""), "episodes carry a season number");
+        assert!(md.contains("\"episode\""), "episodes carry an episode number");
+
+        // Now open S1E1 (Breaking Bad S1E1 video id) the way openEpisode()/loadEpisodeStreams() does:
+        // a MetaDetails Load with a stream path scoped to the episode's video id.
+        engine_dispatch(
+            r#"{"field":"meta_details","action":{"action":"Load","args":{"model":"MetaDetails","args":{"metaPath":{"resource":"meta","type":"series","id":"tt0903747","extra":[]},"guessStream":true,"streamPath":{"resource":"stream","type":"series","id":"tt0903747:1:1","extra":[]}}}}}"#.to_owned(),
+        );
+
+        let mut ep = String::from("null");
+        for _ in 0..40 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            ep = engine_get_state(r#""meta_details""#.to_owned());
+            if ep.contains("\"streams\"") {
+                break;
+            }
+        }
+        println!("episode meta_details ({} bytes): {}", ep.len(), &ep[..ep.len().min(1200)]);
+
+        // The episode stream list groups by the same per-add-on request.base as the movie page.
+        assert!(ep.contains("\"streams\""), "episode meta_details must expose streams");
+        assert!(
+            ep.contains("\"base\"") && ep.contains("\"path\""),
+            "every episode stream request exposes base (the per-add-on grouping key) + path"
         );
     }
 }

@@ -4,9 +4,9 @@
   "version": "0.3.0",
   "identifier": "com.stremiox.desktop",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "bash scripts/fetch-server-deps.sh && npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "bash scripts/fetch-server-deps.sh && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -34,6 +34,10 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "resources/server.cjs": "server.cjs",
+      "resources/node-*": ""
+    }
   }
 }

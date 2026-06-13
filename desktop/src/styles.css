@@ -1,14 +1,26 @@
-/* StremioX desktop. Dark by intent (a media app in a dim room at night), neutrals tinted toward the
-   violet brand hue, one vivid accent. Matches the iOS/tvOS/Android palette so the apps feel like one
-   product. */
+/* StremioX desktop. Editorial-cinema direction shared with the Apple TV gold standard: a warm
+   near-black canvas so poster art is the only color on screen, a single ember accent that means
+   focus / selection / primary / progress, a serif hero title, and surface cards that brighten on
+   hover. Palette + type mirror SourcesShared/Theme.swift so the apps read as one product. */
 :root {
-  --bg: #0e0b14;
-  --surface: #16121f;
-  --surface-2: #211b30;
-  --accent: #7b5bff;
-  --text: #ece9f2;
-  --muted: #9a93ad;
+  /* Warm near-black chrome, tinted toward the ember hue (matches ThemeManager tintedDark). */
+  --bg: #161310;
+  --surface: #221d18;
+  --surface-2: #2c251f;
+  --surface-3: #392f27;
+  /* Ember accent (Theme.swift default): base #F27849, bright #FF9163. */
+  --accent: #f27849;
+  --accent-bright: #ff9163;
+  --accent-soft: rgba(242, 120, 73, 0.18);
+  --on-accent: #1b110b;
+  --text: #f6f1e9;
+  --muted: #bcb1a1;
+  --muted-2: #8c8273;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --serif: "New York", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --radius-card: 16px;
+  --radius-chip: 12px;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 * {
@@ -22,7 +34,7 @@ body {
 body {
   font-family: var(--font);
   color: var(--text);
-  background: radial-gradient(90% 50% at 50% 0%, #1a1430 0%, var(--bg) 55%), var(--bg);
+  background: radial-gradient(90% 50% at 50% 0%, #241a13 0%, var(--bg) 55%), var(--bg);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -43,8 +55,9 @@ body {
   z-index: 2;
 }
 .wordmark {
-  font-size: 1.6rem;
-  font-weight: 800;
+  font-family: var(--serif);
+  font-size: 1.7rem;
+  font-weight: 700;
   letter-spacing: -0.02em;
 }
 .accent {
@@ -97,10 +110,11 @@ body {
   background: linear-gradient(160deg, var(--surface-2), var(--surface));
   object-fit: cover;
   display: block;
-  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 180ms var(--ease), box-shadow 180ms var(--ease);
 }
 .poster:hover .art {
   transform: translateY(-4px) scale(1.03);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 0 0 2px var(--accent-soft);
 }
 .poster .name {
   margin-top: 0.45rem;
@@ -142,78 +156,438 @@ body {
   font: inherit;
   font-weight: 600;
   color: var(--text);
-  background: rgba(22, 18, 31, 0.85);
+  background: rgba(34, 29, 24, 0.85);
   backdrop-filter: blur(8px);
   cursor: pointer;
+  transition: background 150ms var(--ease);
 }
 .back:hover {
-  background: var(--surface-2);
+  background: var(--surface-3);
 }
 
+/* Full-bleed backdrop with a multi-stop scrim — the artwork stays vivid up top, the canvas takes
+   over toward the bottom and the leading edge so the text block + rows stay readable. Mirrors
+   FullBleedBackdrop in DetailView.swift. */
 .detail-bg {
-  position: absolute;
+  position: fixed;
   inset: 0;
   background-size: cover;
   background-position: center top;
-  opacity: 0.5;
+  z-index: 0;
+}
+.detail-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(to right, rgba(22, 19, 16, 0.7) 0%, transparent 55%),
+    linear-gradient(
+      to bottom,
+      transparent 0%,
+      rgba(22, 19, 16, 0.18) 50%,
+      rgba(22, 19, 16, 0.6) 78%,
+      rgba(22, 19, 16, 0.94) 100%
+    );
 }
 .detail-body {
   position: relative;
-  max-width: 52rem;
+  z-index: 2;
+  max-width: 60rem;
   margin: 0 auto;
-  padding: 30vh 2rem 3rem;
+  padding: 42vh 2.5rem 4rem;
 }
-.detail-body h1 {
-  font-size: clamp(2rem, 1rem + 3vw, 3.25rem);
+.detail-logo {
+  max-width: min(440px, 70%);
+  max-height: 160px;
+  object-fit: contain;
+  object-position: left bottom;
+  display: block;
+  margin-bottom: 0.25rem;
+  filter: drop-shadow(0 4px 14px rgba(0, 0, 0, 0.6));
+}
+.detail-title {
+  font-family: var(--serif);
+  font-size: clamp(2.4rem, 1rem + 4vw, 4.5rem);
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
+  line-height: 1.02;
+  text-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
-.meta-sub {
+.meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.1rem;
+  margin-top: 0.85rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+.meta-row .rating {
+  color: var(--text);
+}
+.meta-row .rating::first-letter {
   color: var(--accent);
-  font-weight: 600;
-  margin-top: 0.35rem;
 }
 .desc {
   color: var(--text);
   line-height: 1.6;
-  margin-top: 1rem;
-  max-width: 42rem;
+  margin-top: 1.1rem;
+  max-width: 46rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
-.detail-body h3 {
-  margin-top: 2rem;
-  font-size: 1.1rem;
+
+/* Series: season selector chips + episode list (mirrors CoreSeasonedEpisodes). */
+.season-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 1.6rem;
 }
-.streams {
+.episodes-section {
+  margin-top: 1.4rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
+  gap: 0.7rem;
 }
-.stream {
+.episodes-eyebrow {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+.episodes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+/* Episode row: thumbnail + S#E# meta + title + overview, brightens with an ember ring like a stream
+   row (RowFocusStyle). */
+.episode {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
   text-align: left;
-  border: none;
-  border-radius: 10px;
-  padding: 0.85rem 1rem;
+  border: 2px solid transparent;
+  border-radius: var(--radius-card);
+  padding: 0.7rem 0.85rem;
   font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+  transition: background 150ms var(--ease), border-color 150ms var(--ease), transform 150ms var(--ease);
+}
+.episode:hover {
+  background: var(--surface-2);
+  border-color: var(--accent);
+  transform: translateX(3px);
+}
+.episode-thumb {
+  flex: 0 0 auto;
+  width: 152px;
+  height: 86px;
+  border-radius: var(--radius-chip);
+  object-fit: cover;
+  background: linear-gradient(160deg, var(--surface-3), var(--surface-2));
+}
+.episode-thumb-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted-2);
+  font-size: 1.5rem;
+}
+.episode-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+.episode-meta {
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+.episode-title {
+  font-weight: 600;
+  line-height: 1.3;
+}
+.episode-overview {
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Open episode page: a back-to-episodes chip, the show eyebrow, the episode title + its meta row,
+   then the SAME stream section the movie page uses (mirrors CoreEpisodeStreams). */
+.episode-back {
+  align-self: flex-start;
+  margin-bottom: 1rem;
+}
+.episode-eyebrow {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.episode-screen-title {
+  font-family: var(--serif);
+  font-size: clamp(1.9rem, 1rem + 3vw, 3.2rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  margin-top: 0.35rem;
+  text-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+/* Stream section: Watch-Now first, then quality picker / all-sources, then the grouped list. */
+.stream-section {
+  margin-top: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.stream-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+/* Primary action: ember fill, brightens + lifts on hover (mirrors PrimaryActionStyle). */
+.watch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: none;
+  border-radius: 14px;
+  padding: 0.85rem 1.6rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--on-accent);
+  background: var(--accent);
+  cursor: pointer;
+  transition: transform 150ms var(--ease), background 150ms var(--ease), box-shadow 150ms var(--ease);
+}
+.watch:hover:not(:disabled) {
+  background: var(--accent-bright);
+  transform: scale(1.04);
+  box-shadow: 0 14px 30px var(--accent-soft);
+}
+.watch .play-icon {
+  font-size: 0.85em;
+}
+.watch.disabled,
+.watch.loading {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Chips: surface pills that brighten on hover, ember-tinted when selected (mirrors ChipButtonStyle). */
+.chip {
+  border: none;
+  border-radius: var(--radius-chip);
+  padding: 0.7rem 1.15rem;
+  font: inherit;
+  font-weight: 600;
   color: var(--text);
   background: var(--surface-2);
   cursor: pointer;
-  transition: transform 150ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background 150ms var(--ease), color 150ms var(--ease), transform 150ms var(--ease);
+}
+.chip:hover {
+  background: var(--surface-3);
+  transform: translateY(-1px);
+}
+.chip.selected {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.trailer-chip {
+  align-self: flex-start;
+  margin-top: 0.4rem;
+}
+
+/* Quality picker panel (two levels rendered inline). */
+.quality-panel {
+  background: var(--surface);
+  border-radius: var(--radius-card);
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.quality-eyebrow {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+.quality-tiers,
+.quality-variants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.quality-variant {
+  border: none;
+  border-radius: var(--radius-chip);
+  padding: 0.65rem 1rem;
+  font: inherit;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--surface-2);
+  cursor: pointer;
+  transition: background 150ms var(--ease), color 150ms var(--ease);
+}
+.quality-variant:hover {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* Per-add-on source filter bar. */
+.source-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 0.35rem;
+}
+
+/* Stream rows: surface cards with an add-on badge + parsed quality tags, brighten on hover with an
+   ember ring (mirrors RowFocusStyle + the streamLabel layout). */
+.streams {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.stream {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.9rem;
+  text-align: left;
+  border: 2px solid transparent;
+  border-radius: var(--radius-card);
+  padding: 0.9rem 1.1rem;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  cursor: pointer;
+  transition: background 150ms var(--ease), border-color 150ms var(--ease), transform 150ms var(--ease);
 }
 .stream:hover {
-  transform: translateX(4px);
+  background: var(--surface-2);
+  border-color: var(--accent);
+  transform: translateX(3px);
+}
+.stream-icon {
+  color: var(--accent);
+  font-size: 1.3rem;
+  line-height: 1.4;
+}
+.stream-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.stream-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.badge {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--muted);
+}
+/* Torrent sources play through the embedded streaming server — flagged distinctly from a direct/
+   debrid add-on badge so the source class is legible at a glance. */
+.badge-torrent {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+.stream-tags {
+  font-size: 0.78rem;
+  font-weight: 600;
   color: var(--accent);
 }
+.stream-name {
+  font-weight: 600;
+}
+.stream-desc {
+  font-size: 0.85rem;
+  color: var(--muted);
+  white-space: pre-line;
+  line-height: 1.4;
+}
+
 .muted {
   color: var(--muted);
-  margin-top: 0.5rem;
+  margin-top: 0.25rem;
   line-height: 1.5;
+  max-width: 42rem;
+}
+.muted.small {
+  font-size: 0.85rem;
+  color: var(--muted-2);
+  margin: 0;
 }
 .detail-loading {
   padding: 40vh 2rem;
   text-align: center;
   color: var(--muted);
 }
+
+/* Spinner for the "Finding sources…" primary button. */
+.spinner {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  border: 2px solid var(--on-accent);
+  border-top-color: transparent;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Trailer: a YouTube embed layered over the detail overlay. */
+.trailer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.trailer-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+.trailer-close {
+  z-index: 22;
+}
+
 .video {
   width: 100%;
   height: 100%;
