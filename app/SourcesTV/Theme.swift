@@ -56,31 +56,21 @@ enum Theme {
 
     // MARK: Typography (system only: New York serif for editorial moments, SF Pro for UI)
 
-    /// User-tunable UI text scale (Settings, Appearance). Read once at launch: live font
-    /// changes would need every screen to re-render, so a relaunch applies it, like the
-    /// Performance setting. Base sizes sit one step up from the original ramp (field
-    /// feedback: UI text read small at ten feet).
-    enum TextScale {
-        static let key = "stremiox.ui.textScale"
-        static let choices: [(id: String, label: String, factor: CGFloat)] = [
-            ("s", "Smaller", 0.92), ("m", "Default", 1.0), ("l", "Larger", 1.12),
-        ]
-        static let current: CGFloat = {
-            let id = UserDefaults.standard.string(forKey: key) ?? "m"
-            return choices.first { $0.id == id }?.factor ?? 1.0
-        }()
-    }
-
+    /// Every size is a computed `static var` that multiplies by the LIVE text scale from
+    /// ThemeManager (Settings, Appearance). Because the screens observe ThemeManager, changing
+    /// the scale repaints the app instantly, the same way the accent does, no relaunch needed.
     enum Typography {
-        private static func scaled(_ size: CGFloat) -> CGFloat { (size * TextScale.current).rounded() }
-        static let hero        = Font.system(size: scaled(64), weight: .heavy, design: .serif)
-        static let wordmark    = Font.system(size: scaled(38), weight: .bold, design: .serif)
-        static let screenTitle = Font.system(size: scaled(53), weight: .heavy)
-        static let sectionTitle = Font.system(size: scaled(31), weight: .semibold)
-        static let cardTitle   = Font.system(size: scaled(23), weight: .semibold)
-        static let body        = Font.system(size: scaled(25), weight: .regular)
-        static let label       = Font.system(size: scaled(21), weight: .medium)
-        static let eyebrow     = Font.system(size: scaled(16), weight: .bold)
+        private static func scaled(_ size: CGFloat) -> CGFloat {
+            (size * CGFloat(ThemeManager.shared.textScale)).rounded()
+        }
+        static var hero: Font        { .system(size: scaled(64), weight: .heavy, design: .serif) }
+        static var wordmark: Font    { .system(size: scaled(38), weight: .bold, design: .serif) }
+        static var screenTitle: Font { .system(size: scaled(52), weight: .heavy) }
+        static var sectionTitle: Font { .system(size: scaled(30), weight: .semibold) }
+        static var cardTitle: Font   { .system(size: scaled(22), weight: .semibold) }
+        static var body: Font        { .system(size: scaled(24), weight: .regular) }
+        static var label: Font       { .system(size: scaled(20), weight: .medium) }
+        static var eyebrow: Font     { .system(size: scaled(15), weight: .bold) }
     }
 }
 

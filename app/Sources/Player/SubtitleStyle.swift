@@ -11,6 +11,7 @@ enum SubtitleStyle {
     enum Key {
         static let font = "stremiox.sub.font"
         static let size = "stremiox.sub.size"
+        static let sizeScale = "stremiox.sub.sizeScale"
         static let color = "stremiox.sub.color"
         static let background = "stremiox.sub.background"
     }
@@ -19,6 +20,11 @@ enum SubtitleStyle {
     static let defaultSize = "m"
     static let defaultColor = "white"
     static let defaultBackground = "outline"
+
+    /// A fine +/- multiplier on top of the named size (Settings and the in-player stepper),
+    /// so a viewer can nudge subtitles bigger or smaller without jumping a whole size step.
+    static let sizeScaleRange: ClosedRange<Double> = 0.60...1.80
+    static let sizeScaleStep: Double = 0.10
 
     /// Choices surfaced in Settings. The `id` is what's persisted.
     ///
@@ -45,7 +51,18 @@ enum SubtitleStyle {
     }
 
     static var fontId: String { current(Key.font, defaultFont) }
-    static var fontSize: Int { (sizes.first { $0.id == current(Key.size, defaultSize) } ?? sizes[1]).fontSize }
+
+    /// The fine size multiplier (default 1.0), clamped to range.
+    static var sizeScale: Double {
+        let raw = UserDefaults.standard.object(forKey: Key.sizeScale) as? Double ?? 1.0
+        return min(max(raw, sizeScaleRange.lowerBound), sizeScaleRange.upperBound)
+    }
+
+    /// The named base size times the fine multiplier, the value handed to mpv's sub-font-size.
+    static var fontSize: Int {
+        let base = (sizes.first { $0.id == current(Key.size, defaultSize) } ?? sizes[1]).fontSize
+        return Int((Double(base) * sizeScale).rounded())
+    }
     static var colorHex: String { (colors.first { $0.id == current(Key.color, defaultColor) } ?? colors[0]).hex }
     static var backgroundId: String { current(Key.background, defaultBackground) }
 

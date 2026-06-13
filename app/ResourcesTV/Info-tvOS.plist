@@ -14,9 +14,13 @@
 	     with ExternalPlayers.candidates. -->
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
-		<string>vlc-x-callback</string>
 		<string>infuse</string>
+		<string>vlc-x-callback</string>
+		<string>vlc</string>
 		<string>senplayer</string>
+		<string>outplayer</string>
+		<string>nplayer-stremiox</string>
+		<string>mxplayer</string>
 	</array>
 </dict>
 </plist>
