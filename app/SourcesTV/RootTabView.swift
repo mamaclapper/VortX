@@ -125,10 +125,10 @@ struct RootTabView: View {
                 .tabItem { Label("Discover", systemImage: "safari.fill") }.tag(1)
             LibraryView().id(resetTokens[2])
                 .tabItem { Label("Library", systemImage: "books.vertical.fill") }.tag(2)
-            AddonsView().id(resetTokens[3])
-                .tabItem { Label("Add-ons", systemImage: "puzzlepiece.extension.fill") }.tag(3)
             NavigationStack { SearchView() }.id(resetTokens[4])
                 .tabItem { Label("Search", systemImage: "magnifyingglass") }.tag(4)
+            AddonsView().id(resetTokens[3])
+                .tabItem { Label("Add-ons", systemImage: "puzzlepiece.extension.fill") }.tag(3)
             SettingsView().id(resetTokens[5])
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }.tag(5)
         }

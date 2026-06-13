@@ -1,59 +1,151 @@
 import SwiftUI
 
-/// Minimal touch sign-in: email + password into the shared StremioAccount, which seeds the engine
-/// (add-ons + library). QR sign-in and Sign in with Apple come in later 0.3.0 iterations.
+/// Touch sign-in for a Stremio account, on the StremioX design system (see Theme.swift).
+/// QR/link login is the default so passwords are entered on Stremio's own web flow; a password
+/// form remains available as a fallback. Either path seeds the engine (add-ons + library) the
+/// moment the account reports signed-in, so Home's rails populate without a cold relaunch.
 struct iOSSignInView: View {
     @EnvironmentObject private var account: StremioAccount
     @EnvironmentObject private var core: CoreBridge
     @Environment(\.dismiss) private var dismiss
+
+    @State private var mode: Mode = .link
     @State private var email = ""
     @State private var password = ""
     @State private var busy = false
-    @State private var error: String?
+
+    private enum Mode { case link, password }
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Stremio account") {
-                    TextField("Email", text: $email)
-                        .textContentType(.username).emailFieldStyle().autocorrectionDisabled()
-                    SecureField("Password", text: $password).textContentType(.password)
-                }
-                if let error {
-                    Text(error).font(Theme.Typography.label).foregroundStyle(Theme.Palette.danger)
-                }
-                Section {
-                    Button {
-                        Task { await signIn() }
-                    } label: {
-                        HStack { if busy { ProgressView() }; Text("Sign In") }
+            ZStack {
+                Theme.Palette.canvas.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: Theme.Space.lg) {
+                        wordmark
+                        intro
+                        if mode == .link {
+                            LinkLoginView(account: account)
+                        } else {
+                            passwordCard
+                        }
+                        modeToggle
+                        footnote
                     }
-                    .disabled(busy || email.isEmpty || password.isEmpty)
-                }
-                Section {
-                    Text("Signing in pulls your add-ons and library into the app. QR sign-in is coming.")
-                        .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textTertiary)
+                    .frame(maxWidth: .infinity)
+                    .padding(Theme.Space.lg)
                 }
             }
-            .navigationTitle("Sign In")
+            .navigationTitle("")          // the wordmark IS the title
             .inlineNavigationTitle()
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
         }
+        // One place handles success for BOTH paths (password + QR/link): seed the engine with the
+        // freshly written authKey, then dismiss. CoreBridge booted signed-out at launch, so without
+        // signedInWithLegacyAuthKey() the Home rails (boardRows / continueWatching) stay empty until
+        // the next cold launch. Mirrors the password sequence the older form ran inline.
+        .onReceive(account.$isSignedIn) { signedIn in
+            guard signedIn else { return }
+            account.reloadForActiveProfile()
+            core.signedInWithLegacyAuthKey()
+            dismiss()
+        }
+    }
+
+    // MARK: Brand
+
+    private var wordmark: some View {
+        HStack(spacing: 0) {
+            Text("Stremio").foregroundStyle(Theme.Palette.textPrimary)
+            Text("X").foregroundStyle(Theme.Palette.accent)
+        }
+        .font(Theme.Typography.wordmark)
+        .padding(.top, Theme.Space.sm)
+    }
+
+    private var intro: some View {
+        Text(mode == .link
+             ? "Scan the QR code, or enter the code at link.stremio.com on another device to sign in."
+             : "Sign in to your Stremio account to pull in your add-ons and library.")
+            .font(Theme.Typography.body)
+            .foregroundStyle(Theme.Palette.textSecondary)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // MARK: Password fallback
+
+    private var passwordCard: some View {
+        VStack(spacing: Theme.Space.md) {
+            field {
+                TextField("Email", text: $email)
+                    .textContentType(.username)
+                    .emailFieldStyle()
+                    .autocorrectionDisabled()
+            }
+            field { SecureField("Password", text: $password).textContentType(.password) }
+
+            if let err = account.signInError {
+                Text(err)
+                    .font(Theme.Typography.label)
+                    .foregroundStyle(Theme.Palette.danger)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Button {
+                Task { await signIn() }
+            } label: {
+                HStack(spacing: Theme.Space.xs) {
+                    if busy { ProgressView().tint(Theme.Palette.onAccent) }
+                    Text(busy ? "Signing in…" : "Sign In")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(PrimaryActionStyle())
+            .disabled(busy || email.isEmpty || password.isEmpty)
+        }
+        .frame(maxWidth: 460)
+    }
+
+    /// A warm surface card wrapping a single text/secure field, matching the tvOS login fields.
+    private func field<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .font(Theme.Typography.body)
+            .foregroundStyle(Theme.Palette.textPrimary)
+            .padding(.horizontal, Theme.Space.md)
+            .padding(.vertical, Theme.Space.sm)
+            .background(Theme.Palette.surface1,
+                        in: RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+    }
+
+    // MARK: Mode toggle + footnote
+
+    private var modeToggle: some View {
+        Button {
+            account.signInError = nil
+            mode = (mode == .link) ? .password : .link
+        } label: {
+            Text(mode == .link ? "Use password instead" : "Use QR code instead")
+        }
+        .buttonStyle(ChipButtonStyle())
+    }
+
+    private var footnote: some View {
+        Text("Signing in pulls your add-ons and library into the app. Your account stays on this device.")
+            .font(Theme.Typography.label)
+            .foregroundStyle(Theme.Palette.textTertiary)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, Theme.Space.xs)
     }
 
     private func signIn() async {
-        busy = true; error = nil
+        busy = true
         await account.signIn(email: email, password: password)
         busy = false
-        if account.isSignedIn {
-            account.reloadForActiveProfile()
-            // Seed the engine with the freshly written authKey. CoreBridge booted signed-out at
-            // launch, so without this the Home rails (boardRows / continueWatching) stay empty
-            // until the next cold launch. tvOS LoginView does the same right after sign-in.
-            core.signedInWithLegacyAuthKey()
-            dismiss()
-        } else {
-            error = "Sign in failed. Check your email and password."
-        }
+        // Success (isSignedIn flips true) is handled centrally in .onReceive above, which runs the
+        // reloadForActiveProfile() -> signedInWithLegacyAuthKey() -> dismiss() sequence. On failure
+        // account.signInError carries the message and the form stays put.
     }
 }

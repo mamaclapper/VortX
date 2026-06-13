@@ -61,7 +61,15 @@ enum Theme {
     /// the scale repaints the app instantly, the same way the accent does, no relaunch needed.
     enum Typography {
         private static func scaled(_ size: CGFloat) -> CGFloat {
-            (size * CGFloat(ThemeManager.shared.textScale)).rounded()
+            // Base sizes are tvOS 10-foot dimensions. On phone / iPad / Mac, viewed at arm's length,
+            // those render far too large, so scale the base down to 62% before applying the user's
+            // live textScale. tvOS keeps the full base. (Root cause of the "text too big" report.)
+            #if os(tvOS)
+            let base = size
+            #else
+            let base = size * 0.62
+            #endif
+            return (base * CGFloat(ThemeManager.shared.textScale)).rounded()
         }
         static var hero: Font        { .system(size: scaled(64), weight: .heavy, design: .serif) }
         static var wordmark: Font    { .system(size: scaled(38), weight: .bold, design: .serif) }

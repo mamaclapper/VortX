@@ -27,7 +27,7 @@ struct ChipButtonStyle: ButtonStyle {
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
         var body: some View {
-            configuration.label
+            let styled = configuration.label
                 .font(Theme.Typography.label)
                 .padding(.horizontal, Theme.Space.md)
                 .padding(.vertical, Theme.Space.xs + 2)
@@ -37,8 +37,17 @@ struct ChipButtonStyle: ButtonStyle {
                 .scaleEffect(configuration.isPressed ? 0.97 : (focused && !reduceMotion ? 1.06 : 1))
                 .padding(focusMargin)
                 .contentShape(Capsule(style: .continuous))
+            // `.focusEffectDisabled()` is tvOS / macOS 14+ / iOS 17+. The iOS target deploys to 16,
+            // so gate it. On tvOS it suppresses the system's default focus halo in favour of our ring;
+            // on iOS/macOS there is no system focus halo on these chips, so dropping it is a no-op.
+            #if os(tvOS)
+            return styled
                 .focusEffectDisabled()
                 .animation(reduceMotion ? nil : Theme.Motion.focus, value: focused)
+            #else
+            return styled
+                .animation(reduceMotion ? nil : Theme.Motion.focus, value: focused)
+            #endif
         }
 
         private var fill: Color {

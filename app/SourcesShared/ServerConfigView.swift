@@ -22,12 +22,7 @@ struct ServerConfigView: View {
                     .font(Theme.Typography.body).foregroundStyle(Theme.Palette.textSecondary)
                     .frame(maxWidth: 1100, alignment: .leading)
 
-                TextField("http://192.168.1.50:11470", text: $url)
-                    .textContentType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .font(Theme.Typography.body).foregroundStyle(Theme.Palette.textPrimary)
-                    .padding(.horizontal, Theme.Space.md).padding(.vertical, Theme.Space.sm)
-                    .background(Theme.Palette.surface1, in: RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
-                    .frame(width: 1000)
+                urlField
 
                 // NOTE: never use `.disabled` on tvOS buttons, a disabled button is not focusable, so
                 // the remote can't move onto it and focus gets stuck on the only enabled control. Keep all
@@ -54,6 +49,27 @@ struct ServerConfigView: View {
             .padding(Theme.Space.screenEdge)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+    }
+
+    // `.textInputAutocapitalization(_:)` and `.textContentType(_:)` are UIKit-backed (iOS / tvOS
+    // only); macOS SwiftUI does not expose them. Gate so this view compiles on the Mac target while
+    // keeping the iOS / tvOS keyboard behaviour identical. `.autocorrectionDisabled()` is fine on all.
+    @ViewBuilder private var urlField: some View {
+        #if os(macOS)
+        TextField("http://192.168.1.50:11470", text: $url)
+            .autocorrectionDisabled()
+            .font(Theme.Typography.body).foregroundStyle(Theme.Palette.textPrimary)
+            .padding(.horizontal, Theme.Space.md).padding(.vertical, Theme.Space.sm)
+            .background(Theme.Palette.surface1, in: RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+            .frame(width: 1000)
+        #else
+        TextField("http://192.168.1.50:11470", text: $url)
+            .textContentType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+            .font(Theme.Typography.body).foregroundStyle(Theme.Palette.textPrimary)
+            .padding(.horizontal, Theme.Space.md).padding(.vertical, Theme.Space.sm)
+            .background(Theme.Palette.surface1, in: RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+            .frame(width: 1000)
+        #endif
     }
 
     private func save() {

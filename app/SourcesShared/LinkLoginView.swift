@@ -8,13 +8,34 @@ struct LinkLoginView: View {
 
     @State private var busy = false
     @State private var code: LinkAuthService.LinkCode?
-    @State private var qrImage: UIImage?
+    // Held as a CGImage rather than UIImage: CGImage is cross-platform (iOS / tvOS / macOS), so this
+    // view compiles on the Mac target without a UIImage/NSImage split. CIContext yields a CGImage
+    // directly, and SwiftUI's `Image(decorative:scale:)` renders it on every platform.
+    @State private var qrImage: CGImage?
     @State private var status = ""
     @State private var errorMessage: String?
     @State private var pollTask: Task<Void, Never>?
 
     private static let pollInterval: Duration = .seconds(2)
     private static let timeout: TimeInterval = 5 * 60
+
+    // tvOS is viewed at ten feet, so its QR / code / panel are large. Phone and Mac are viewed at
+    // arm's length, so size everything down (QR ~220pt, code ~40pt mono) and let the panel be fluid.
+    #if os(tvOS)
+    private static let panelWidth: CGFloat? = 760
+    private static let cardSize: CGFloat = 330
+    private static let qrSize: CGFloat = 286
+    private static let codeFontSize: CGFloat = 58
+    private static let linkFontSize: CGFloat = 20
+    private static let controlWidth: CGFloat = 280
+    #else
+    private static let panelWidth: CGFloat? = nil
+    private static let cardSize: CGFloat = 252
+    private static let qrSize: CGFloat = 220
+    private static let codeFontSize: CGFloat = 40
+    private static let linkFontSize: CGFloat = 14
+    private static let controlWidth: CGFloat = 240
+    #endif
 
     var body: some View {
         VStack(spacing: Theme.Space.md) {
@@ -23,7 +44,8 @@ struct LinkLoginView: View {
             statusText
             refreshButton
         }
-        .frame(width: 760)
+        .frame(width: Self.panelWidth)
+        .frame(maxWidth: .infinity)
         .onAppear { start() }
         .onDisappear { stop() }
     }
@@ -32,15 +54,21 @@ struct LinkLoginView: View {
         ZStack {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.white)
-                .frame(width: 330, height: 330)
+                .frame(width: Self.cardSize, height: Self.cardSize)
             if let qrImage {
-                Image(uiImage: qrImage)
+                Image(decorative: qrImage, scale: 1)
                     .interpolation(.none)
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 286, height: 286)
+                    .frame(width: Self.qrSize, height: Self.qrSize)
             } else if busy {
+                // BigSpinner lives in SourcesTV (not compiled into iOS/macOS); inline its identical
+                // body — ProgressView at 1.5x with the accent tint — for the non-tvOS targets.
+                #if os(tvOS)
                 BigSpinner()
+                #else
+                ProgressView().scaleEffect(1.5).tint(Theme.Palette.accent)
+                #endif
             } else {
                 Image(systemName: "qrcode")
                     .font(.system(size: 110))
@@ -53,14 +81,17 @@ struct LinkLoginView: View {
         if let code {
             VStack(spacing: 8) {
                 Text(code.code)
-                    .font(.system(size: 58, weight: .heavy, design: .monospaced))
+                    .font(.system(size: Self.codeFontSize, weight: .heavy, design: .monospaced))
                     .foregroundStyle(Theme.Palette.textPrimary)
                 Text("Go to link.stremio.com and enter this code")
                     .font(Theme.Typography.label)
                     .foregroundStyle(Theme.Palette.textSecondary)
+                    .multilineTextAlignment(.center)
                 Text(code.link)
-                    .font(.system(size: 20, design: .monospaced))
+                    .font(.system(size: Self.linkFontSize, design: .monospaced))
                     .foregroundStyle(Theme.Palette.textTertiary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
             }
         }
     }
@@ -83,7 +114,7 @@ struct LinkLoginView: View {
         Button {
             start()
         } label: {
-            Text(busy ? "Creating code…" : "Refresh code").frame(width: 280)
+            Text(busy ? "Creating code…" : "Refresh code").frame(width: Self.controlWidth)
         }
         .buttonStyle(PrimaryActionStyle())
         .disabled(busy)
@@ -149,14 +180,14 @@ struct LinkLoginView: View {
         pollTask = nil
     }
 
-    private static func makeQRCodeImage(_ string: String) -> UIImage? {
+    private static func makeQRCodeImage(_ string: String) -> CGImage? {
         guard let data = string.data(using: .utf8),
               let filter = CIFilter(name: "CIQRCodeGenerator") else { return nil }
         filter.setValue(data, forKey: "inputMessage")
         filter.setValue("M", forKey: "inputCorrectionLevel")
         guard let output = filter.outputImage else { return nil }
         let scaled = output.transformed(by: CGAffineTransform(scaleX: 12, y: 12))
-        guard let cgImage = CIContext().createCGImage(scaled, from: scaled.extent) else { return nil }
-        return UIImage(cgImage: cgImage)
+        // CIContext yields a CGImage directly — cross-platform, no UIImage/NSImage wrap needed.
+        return CIContext().createCGImage(scaled, from: scaled.extent)
     }
 }

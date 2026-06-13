@@ -14,6 +14,8 @@ struct iOSRootView: View {
                 .tabItem { Label("Library", systemImage: "books.vertical.fill") }
             iOSSearchView()
                 .tabItem { Label("Search", systemImage: "magnifyingglass") }
+            AddonsView()
+                .tabItem { Label("Add-ons", systemImage: "puzzlepiece.extension.fill") }
             iOSSettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
@@ -26,6 +28,7 @@ struct iOSRootView: View {
 struct iOSHomeView: View {
     @EnvironmentObject private var core: CoreBridge
     @EnvironmentObject private var account: StremioAccount
+    @EnvironmentObject private var theme: ThemeManager   // observe textScale so Theme.Typography repaints live
     @State private var showSignIn = false
 
     var body: some View {
@@ -86,6 +89,7 @@ struct iOSHomeView: View {
 /// changes; reloads while empty since it syncs asynchronously after sign-in.
 struct iOSLibraryView: View {
     @EnvironmentObject private var core: CoreBridge
+    @EnvironmentObject private var theme: ThemeManager   // observe textScale so Theme.Typography repaints live
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -110,6 +114,7 @@ struct iOSLibraryView: View {
 /// Search across every installed add-on, on the engine (debounced), as a poster grid.
 struct iOSSearchView: View {
     @EnvironmentObject private var core: CoreBridge
+    @EnvironmentObject private var theme: ThemeManager   // observe textScale so Theme.Typography repaints live
     @State private var query = ""
     @State private var searchTask: Task<Void, Never>?
     var body: some View {
@@ -154,6 +159,7 @@ struct iOSSearchView: View {
 struct iOSDiscoverView: View {
     @EnvironmentObject private var core: CoreBridge
     @EnvironmentObject private var account: StremioAccount
+    @EnvironmentObject private var theme: ThemeManager   // observe textScale so Theme.Typography repaints live
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -211,6 +217,7 @@ private struct RailItem: Identifiable { let id: String; let type: String; let na
 /// A poster grid (Library, Search) reusing the same card + detail navigation as the rails.
 private struct PosterGrid: View {
     let items: [RailItem]
+    @EnvironmentObject private var theme: ThemeManager   // observe textScale so Theme.Typography repaints live
     private let columns = [GridItem(.adaptive(minimum: 116), spacing: Theme.Space.sm)]
     var body: some View {
         LazyVGrid(columns: columns, alignment: .leading, spacing: Theme.Space.md) {
@@ -230,6 +237,7 @@ private struct PosterGrid: View {
 private struct PosterRail: View {
     let title: String
     let items: [RailItem]
+    @EnvironmentObject private var theme: ThemeManager   // observe textScale so Theme.Typography repaints live
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.sm) {
             Text(title).font(Theme.Typography.cardTitle).foregroundStyle(Theme.Palette.textPrimary)
@@ -255,6 +263,7 @@ private struct PosterCardiOS: View {
     let name: String
     let poster: String?
     let progress: Double
+    @EnvironmentObject private var theme: ThemeManager   // observe textScale so Theme.Typography repaints live
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .bottom) {
@@ -286,6 +295,7 @@ private struct PosterCardiOS: View {
 /// Cross-version empty state (ContentUnavailableView is iOS 17+; the deployment target is 16).
 private struct ContentUnavailableViewCompat: View {
     let title: String; let systemImage: String; let message: String
+    @EnvironmentObject private var theme: ThemeManager   // observe textScale so Theme.Typography repaints live
     var body: some View {
         VStack(spacing: Theme.Space.md) {
             Image(systemName: systemImage).font(.system(size: 48)).foregroundStyle(Theme.Palette.textTertiary)

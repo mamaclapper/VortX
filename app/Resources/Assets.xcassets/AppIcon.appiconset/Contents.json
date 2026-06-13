@@ -1,6 +1,16 @@
 {
   "images" : [
-    { "filename" : "ios_1024.png", "idiom" : "universal", "platform" : "ios", "size" : "1024x1024" }
+    { "filename" : "ios_1024.png", "idiom" : "universal", "platform" : "ios", "size" : "1024x1024" },
+    { "idiom" : "mac", "size" : "16x16", "scale" : "1x", "filename" : "mac_16.png" },
+    { "idiom" : "mac", "size" : "16x16", "scale" : "2x", "filename" : "mac_16@2x.png" },
+    { "idiom" : "mac", "size" : "32x32", "scale" : "1x", "filename" : "mac_32.png" },
+    { "idiom" : "mac", "size" : "32x32", "scale" : "2x", "filename" : "mac_32@2x.png" },
+    { "idiom" : "mac", "size" : "128x128", "scale" : "1x", "filename" : "mac_128.png" },
+    { "idiom" : "mac", "size" : "128x128", "scale" : "2x", "filename" : "mac_128@2x.png" },
+    { "idiom" : "mac", "size" : "256x256", "scale" : "1x", "filename" : "mac_256.png" },
+    { "idiom" : "mac", "size" : "256x256", "scale" : "2x", "filename" : "mac_256@2x.png" },
+    { "idiom" : "mac", "size" : "512x512", "scale" : "1x", "filename" : "mac_512.png" },
+    { "idiom" : "mac", "size" : "512x512", "scale" : "2x", "filename" : "mac_512@2x.png" }
   ],
   "info" : { "author" : "xcode", "version" : 1 }
 }

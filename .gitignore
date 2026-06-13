@@ -30,3 +30,4 @@ app/Resources/server.js
 # agent / editor config
 .claude/
 app/Resources/fonts/
+graphify-out/

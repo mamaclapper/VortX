@@ -9,6 +9,7 @@ struct iOSDetailView: View {
     let title: String
     @EnvironmentObject private var core: CoreBridge
     @EnvironmentObject private var account: StremioAccount
+    @EnvironmentObject private var theme: ThemeManager   // observe textScale so Theme.Typography repaints live
 
     @State private var player: PlayerLaunch?
     @State private var preparing = false                 // movie Watch Now is resolving

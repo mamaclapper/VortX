@@ -13,7 +13,7 @@ struct AddonsView: View {
                 VStack(alignment: .leading, spacing: Theme.Space.lg) {
                     Text("Add-ons").screenTitleStyle()
                     if !account.isSignedIn {
-                        CoreEmptyState.signedOut
+                        hint("Sign in to manage your add-ons. They sync from the Stremio web or mobile app.")
                     } else if core.addons.isEmpty {
                         hint("No add-ons found on your account yet. Install them from the Stremio web or mobile app and they will sync down on next launch.")
                     } else {

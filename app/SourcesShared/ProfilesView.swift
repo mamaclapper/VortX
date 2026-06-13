@@ -1,5 +1,55 @@
 import SwiftUI
 
+// MARK: - Cross-platform shims (file-local)
+//
+// ProfilesView now lives in SourcesShared, so it compiles into the iOS, macOS and tvOS targets.
+// A few modifiers it uses are not available everywhere:
+//   • `.focusSection()`        — tvOS / macOS 13+ / iOS 17+. The iOS target deploys to 16, so it
+//                                 must be gated. On tvOS it shapes directional-focus traversal;
+//                                 on iOS/macOS there is no remote focus engine, so it is a no-op.
+//   • `.fullScreenCover(...)`  — iOS / tvOS only. macOS has no full-screen cover, so it falls back
+//                                 to a sheet there.
+// These helpers keep the tvOS behaviour byte-for-byte identical while letting the file build on
+// iOS and macOS. `PlatformModifiers.swift` has equivalents but lives in SourcesiOS (not compiled
+// into tvOS), so ProfilesView carries its own file-local copies.
+private extension View {
+    @ViewBuilder func profileFocusSection() -> some View {
+        #if os(tvOS)
+        self.focusSection()
+        #else
+        self
+        #endif
+    }
+
+    @ViewBuilder func profileCover<Item: Identifiable, C: View>(
+        item: Binding<Item?>, @ViewBuilder content: @escaping (Item) -> C) -> some View {
+        #if os(macOS)
+        self.sheet(item: item, content: content)
+        #else
+        self.fullScreenCover(item: item, content: content)
+        #endif
+    }
+
+    @ViewBuilder func profileCover<C: View>(
+        isPresented: Binding<Bool>, @ViewBuilder content: @escaping () -> C) -> some View {
+        #if os(macOS)
+        self.sheet(isPresented: isPresented, content: content)
+        #else
+        self.fullScreenCover(isPresented: isPresented, content: content)
+        #endif
+    }
+
+    /// `.keyboardType(_:)` is UIKit-backed (iOS / tvOS only); macOS has no software keyboard, so
+    /// this is a no-op there. Used for the 4-digit PIN fields.
+    @ViewBuilder func numberPadKeyboard() -> some View {
+        #if os(macOS)
+        self
+        #else
+        self.keyboardType(.numberPad)
+        #endif
+    }
+}
+
 /// Full-screen "Who's watching?" profile picker, shown at cold launch when more than one profile
 /// exists and from Settings as the switcher. Picking a profile applies its theme instantly; when
 /// it binds a different Stremio account the engine session switches in place (never Logout, that
@@ -44,11 +94,16 @@ struct ProfilePickerView: View {
                                onCancel: { pinTarget = nil })
             }
         }
-        .fullScreenCover(item: $editorProfile) { profile in
+        .profileCover(item: $editorProfile) { profile in
             ProfileEditorView(original: profile)
         }
-        .fullScreenCover(isPresented: $signInNeeded) {
+        .profileCover(isPresented: $signInNeeded) {
+            // LoginView is the tvOS sign-in panel (SourcesTV); the touch UI ships iOSSignInView.
+            #if os(tvOS)
             LoginView(account: account)
+            #else
+            iOSSignInView()
+            #endif
         }
     }
 
@@ -95,9 +150,9 @@ struct PinGateOverlay: View {
                     .foregroundStyle(Theme.Palette.textPrimary)
                 SecureField("PIN", text: $input)
                     .font(Theme.Typography.body)
-                    .keyboardType(.numberPad)
+                    .numberPadKeyboard()
                     .frame(width: 360)
-                    .onChange(of: input) {
+                    .onChange(of: input) { _ in
                         input = String(input.filter(\.isNumber).prefix(4))
                         wrong = false
                     }
@@ -262,7 +317,7 @@ struct ProfileEditorView: View {
                         TextField("Or type your own: any emoji or a letter", text: $customAvatar)
                             .font(Theme.Typography.body)
                             .frame(width: 600)
-                            .onChange(of: customAvatar) {
+                            .onChange(of: customAvatar) { _ in
                                 // One grapheme (emoji-safe); single letters display uppercased.
                                 guard let first = customAvatar.first else { return }
                                 let avatar = String(first)
@@ -276,10 +331,18 @@ struct ProfileEditorView: View {
                         }
                         .frame(width: 64, height: 64)
                     }
-                    .focusSection()
+                    .profileFocusSection()
 
-                    ThemeAccentPicker(selection: $draft.accentID).focusSection()
-                    ThemeBackgroundPicker(oled: $draft.oled).focusSection()
+                    // ThemeAccentPicker / ThemeBackgroundPicker live in SourcesTV/SettingsView.swift
+                    // (not compiled into iOS/macOS). On tvOS use them verbatim; on iOS/macOS use the
+                    // file-local equivalents below, built from the same shared ChipButtonStyle.
+                    #if os(tvOS)
+                    ThemeAccentPicker(selection: $draft.accentID).profileFocusSection()
+                    ThemeBackgroundPicker(oled: $draft.oled).profileFocusSection()
+                    #else
+                    ProfileAccentPicker(selection: $draft.accentID).profileFocusSection()
+                    ProfileBackgroundPicker(oled: $draft.oled).profileFocusSection()
+                    #endif
 
                     if draft.isOwner {
                         // The owner IS the main account; offering "its own account" here once
@@ -310,9 +373,9 @@ struct ProfileEditorView: View {
                         SecureField(draft.hasPin ? "PIN set. Enter a new one to change it" : "4 digits, empty for none",
                                     text: $pinText)
                             .font(Theme.Typography.body)
-                            .keyboardType(.numberPad)
+                            .numberPadKeyboard()
                             .frame(width: 600)
-                            .onChange(of: pinText) {
+                            .onChange(of: pinText) { _ in
                                 pinText = String(pinText.filter(\.isNumber).prefix(4))
                             }
                         if draft.hasPin {
@@ -333,7 +396,7 @@ struct ProfileEditorView: View {
                         }
                     }
                     .padding(.top, Theme.Space.md)
-                    .focusSection()
+                    .profileFocusSection()
                 }
                 .padding(Theme.Space.screenEdge)
             }
@@ -402,6 +465,56 @@ struct ProfileEditorView: View {
         // Treat each row as a focus section so Down always drops to the next row, even when
         // the focused chip sits far to the right of the item below it. Without this, tvOS does
         // a strict geometric down-search and refuses to move unless you first level horizontally.
-        .focusSection()
+        .profileFocusSection()
     }
 }
+
+#if !os(tvOS)
+// MARK: - Touch / Mac accent + background pickers
+//
+// The tvOS picker types (ThemeAccentPicker / ThemeBackgroundPicker) live in SourcesTV and are not
+// compiled into the iOS / macOS targets. These file-local equivalents mirror their behaviour for
+// the profile editor on touch and Mac, built from the same shared ChipButtonStyle / CardFocusStyle.
+private struct ProfileAccentPicker: View {
+    @Binding var selection: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
+            Text("Accent").font(Theme.Typography.cardTitle).foregroundStyle(Theme.Palette.textPrimary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Theme.Space.md) {
+                    ForEach(ThemeManager.accents) { opt in
+                        Button { selection = opt.id } label: {
+                            Circle()
+                                .fill(opt.base)
+                                .frame(width: 44, height: 44)
+                                .overlay(Circle().strokeBorder(
+                                    selection == opt.id ? Theme.Palette.textPrimary : .clear,
+                                    lineWidth: 3))
+                        }
+                        .buttonStyle(CardFocusStyle())
+                    }
+                }
+                .padding(.horizontal, Theme.Space.sm)
+                .padding(.vertical, Theme.Space.sm)
+            }
+        }
+    }
+}
+
+private struct ProfileBackgroundPicker: View {
+    @Binding var oled: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
+            Text("Background").font(Theme.Typography.cardTitle).foregroundStyle(Theme.Palette.textPrimary)
+            HStack(spacing: Theme.Space.sm) {
+                Button("Warm") { oled = false }
+                    .buttonStyle(ChipButtonStyle(selected: !oled))
+                Button("OLED Black") { oled = true }
+                    .buttonStyle(ChipButtonStyle(selected: oled))
+            }
+        }
+    }
+}
+#endif
