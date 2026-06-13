@@ -18,6 +18,9 @@ struct LinkLoginView: View {
 
     private static let pollInterval: Duration = .seconds(2)
     private static let timeout: TimeInterval = 5 * 60
+    // ~10s of solid failures (5 polls at 2s) before surfacing the error, so a one-off blip is
+    // ridden out but a real outage stops looking like an endless "Waiting for sign-in…".
+    private static let maxConsecutiveFailures = 5
 
     // tvOS is viewed at ten feet, so its QR / code / panel are large. Phone and Mac are viewed at
     // arm's length, so size everything down (QR ~220pt, code ~40pt mono) and let the panel be fluid.
@@ -140,6 +143,10 @@ struct LinkLoginView: View {
                 }
 
                 let deadline = Date().addingTimeInterval(Self.timeout)
+                // A single network blip must not kill the flow, but a persistent failure (server
+                // down, DNS gone, the link service erroring) must NOT spin silently forever — after
+                // a short run of consecutive failures we surface the last error so the user can act.
+                var consecutiveFailures = 0
                 while !Task.isCancelled {
                     if Date() >= deadline {
                         await MainActor.run {
@@ -148,17 +155,36 @@ struct LinkLoginView: View {
                         }
                         return
                     }
-                    // A transient network blip mid-poll must not kill the flow: only code
-                    // creation failures surface as errors. The loop keeps polling until the
-                    // key arrives, the code expires, or the view goes away.
-                    let token = (try? await LinkAuthService.read(code: created.code)) ?? nil
-                    if let token, !token.isEmpty {
-                        await MainActor.run {
-                            status = "Signing in…"
-                            errorMessage = nil
+                    do {
+                        switch try await LinkAuthService.read(code: created.code) {
+                        case .authKey(let token):
+                            await MainActor.run {
+                                status = "Signing in…"
+                                errorMessage = nil
+                            }
+                            await account.signInWithAuthKey(token)
+                            return
+                        case .pending:
+                            consecutiveFailures = 0
+                            await MainActor.run {
+                                if status.isEmpty { status = "Waiting for sign-in…" }
+                                errorMessage = nil
+                            }
                         }
-                        await account.signInWithAuthKey(token)
+                    } catch is CancellationError {
                         return
+                    } catch {
+                        // Tolerate a few transient failures, then make the problem visible instead
+                        // of leaving the panel stuck on "Waiting for sign-in…".
+                        consecutiveFailures += 1
+                        if consecutiveFailures >= Self.maxConsecutiveFailures {
+                            let message = error.localizedDescription
+                            await MainActor.run {
+                                status = ""
+                                errorMessage = message
+                            }
+                            return
+                        }
                     }
                     try await Task.sleep(for: Self.pollInterval)
                 }

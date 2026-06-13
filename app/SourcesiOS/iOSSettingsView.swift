@@ -20,6 +20,12 @@ struct iOSSettingsView: View {
     @State private var serverOnline: Bool?
     @State private var editingProfile: UserProfile?
     @State private var showSignIn = false
+    #if os(macOS)
+    /// Drives the "Share streaming server on this network" toggle (macOS only). Backed by
+    /// NodeServer.sharedOnLAN, which persists + restarts the node process when it flips.
+    @State private var shareOnLAN = NodeServer.sharedOnLAN
+    @State private var didCopyLAN = false
+    #endif
 
     @AppStorage("stremiox.forceSDRTonemap") private var forceSDRTonemap = false
     @AppStorage(SubtitleStyle.Key.font) private var subFont = SubtitleStyle.defaultFont
@@ -284,6 +290,12 @@ struct iOSSettingsView: View {
                 } label: {
                     Label("Configure server", systemImage: "server.rack")
                 }
+
+                #if os(macOS)
+                // macOS only: let this Mac act as a Stremio streaming server for the rest of the
+                // LAN (like the desktop app), so the Apple TV / phone can use it as their server.
+                if !StremioServer.isCustom { lanSharingControls }
+                #endif
             }
         } header: {
             Text("Streaming Server")
@@ -295,6 +307,59 @@ struct iOSSettingsView: View {
             }
         }
     }
+
+    #if os(macOS)
+    /// The "Share on this network" toggle + LAN URL + transcoding status (macOS only). Shown when
+    /// the embedded server is in use. Flipping the toggle restarts node so the new bind takes hold.
+    @ViewBuilder private var lanSharingControls: some View {
+        Toggle(isOn: Binding(
+            get: { shareOnLAN },
+            set: { newValue in
+                shareOnLAN = newValue
+                NodeServer.sharedOnLAN = newValue            // persists + restarts node
+                didCopyLAN = false
+                Task {                                        // re-check status after the restart
+                    try? await Task.sleep(nanoseconds: 1_200_000_000)
+                    serverOnline = await StremioServer.isOnline()
+                }
+            }
+        )) {
+            Label("Share streaming server on this network", systemImage: "wifi")
+        }
+
+        if shareOnLAN {
+            if let url = NodeServer.lanURL {
+                // The address other devices paste into their own "Configure server" field.
+                Button {
+                    let pb = NSPasteboard.general
+                    pb.clearContents(); pb.setString(url, forType: .string)
+                    didCopyLAN = true
+                } label: {
+                    HStack {
+                        Label(url, systemImage: "link")
+                            .font(.system(.footnote, design: .monospaced))
+                        Spacer()
+                        Image(systemName: didCopyLAN ? "checkmark" : "doc.on.doc")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+            } else {
+                Label("Connect to Wi-Fi or Ethernet to get a shareable address",
+                      systemImage: "wifi.slash")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+
+        if !NodeServer.canTranscode {
+            Label("Install ffmpeg (brew install ffmpeg) to enable VideoToolbox transcoding",
+                  systemImage: "exclamationmark.triangle")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+    }
+    #endif
 
     private var serverColor: Color {
         if effectiveDirectLinksOnly { return Theme.Palette.textTertiary }

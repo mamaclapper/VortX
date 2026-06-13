@@ -1,5 +1,6 @@
 #if os(macOS)
 import Foundation
+import Darwin   // getifaddrs / ifaddrs / getnameinfo for LAN IP discovery
 
 /// macOS streaming server. Runs Stremio's server.js (the torrent engine + /proxy + HLS) in a
 /// CHILD PROCESS, listening on http://127.0.0.1:11470, so TORRENT streams play on the Mac.
@@ -22,6 +23,86 @@ enum NodeServer {
     /// The running child process, kept alive for the app's lifetime (and so we can terminate it).
     private static var process: Process?
 
+    // MARK: - LAN sharing ("act as a server for others on this network")
+
+    /// UserDefaults key for the "Share streaming server on this network" toggle.
+    private static let shareKey = "stremiox.mac.shareServerOnLAN"
+
+    /// When ON, the bundled server binds 0.0.0.0 (all interfaces) so other devices on the LAN
+    /// (your Apple TV / phone) can use this Mac as their Stremio streaming server. When OFF
+    /// (the default), it binds loopback only (127.0.0.1) — the original behaviour, invisible to
+    /// the network. Changing this restarts the node process so the new bind takes effect.
+    static var sharedOnLAN: Bool {
+        get { UserDefaults.standard.bool(forKey: shareKey) }
+        set {
+            guard newValue != sharedOnLAN else { return }
+            UserDefaults.standard.set(newValue, forKey: shareKey)
+            restart()
+        }
+    }
+
+    /// This machine's primary LAN IPv4 address (e.g. 192.168.1.50), or nil if not on a network.
+    /// Prefers en0/en1 (Wi-Fi / Ethernet); skips loopback, link-local (169.254/fe80) and down ifaces.
+    static var lanIP: String? {
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0, let first = ifaddr else { return nil }
+        defer { freeifaddrs(ifaddr) }
+
+        // Rank candidates: prefer en* (Wi-Fi/Ethernet) over anything else.
+        var best: (rank: Int, ip: String)?
+        var ptr: UnsafeMutablePointer<ifaddrs>? = first
+        while let cur = ptr {
+            defer { ptr = cur.pointee.ifa_next }
+            let flags = Int32(cur.pointee.ifa_flags)
+            guard flags & (IFF_UP | IFF_RUNNING) == (IFF_UP | IFF_RUNNING),
+                  flags & IFF_LOOPBACK == 0,
+                  let sa = cur.pointee.ifa_addr, sa.pointee.sa_family == UInt8(AF_INET) else { continue }
+
+            let name = String(cString: cur.pointee.ifa_name)
+            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            guard getnameinfo(sa, socklen_t(sa.pointee.sa_len), &host, socklen_t(host.count),
+                              nil, 0, NI_NUMERICHOST) == 0 else { continue }
+            let ip = String(cString: host)
+            guard !ip.hasPrefix("169.254"), !ip.isEmpty else { continue }   // skip link-local
+
+            let rank = name.hasPrefix("en") ? 0 : 1
+            if best == nil || rank < best!.rank { best = (rank, ip) }
+        }
+        return best?.ip
+    }
+
+    /// The LAN URL other devices paste into their server config, when sharing is on and we have an IP.
+    static var lanURL: String? {
+        guard sharedOnLAN, let ip = lanIP else { return nil }
+        return "http://\(ip):11470"
+    }
+
+    /// Locate an ffmpeg/ffprobe pair the server can use for VideoToolbox transcoding. server.js
+    /// searches a fixed set of paths but NOT Homebrew's Apple-silicon prefix (/opt/homebrew/bin),
+    /// so on most Macs it finds nothing and transcoding silently no-ops. We probe the common
+    /// locations and, when found, hand the pair to node via FFMPEG_BIN / FFPROBE_BIN (the first
+    /// entries server.js honours). With ffmpeg present, server.js auto-detects the macOS
+    /// `videotoolbox` hw-accel profile on boot and uses h264_videotoolbox / hevc_videotoolbox.
+    private static func ffmpegBinaries() -> (ffmpeg: String, ffprobe: String)? {
+        let prefixes = [
+            "/opt/homebrew/bin",   // Homebrew, Apple silicon
+            "/usr/local/bin",      // Homebrew, Intel / manual installs
+            "/usr/bin",            // system
+        ]
+        let fm = FileManager.default
+        for prefix in prefixes {
+            let ff = "\(prefix)/ffmpeg", fp = "\(prefix)/ffprobe"
+            if fm.isExecutableFile(atPath: ff) && fm.isExecutableFile(atPath: fp) {
+                return (ff, fp)
+            }
+        }
+        return nil
+    }
+
+    /// Whether VideoToolbox transcoding can run: a discoverable ffmpeg/ffprobe pair exists.
+    /// (server.js always carries the darwin `videotoolbox` profile and enables it by default.)
+    static var canTranscode: Bool { ffmpegBinaries() != nil }
+
     /// One-line state for the Settings diagnostics (mirrors the iOS/tvOS NodeServer wording).
     static var statusDescription: String {
         if PlaybackSettings.torrentsDisabled { return "Disabled by Direct Links Only" }
@@ -30,6 +111,7 @@ enum NodeServer {
         }
         if !started { return "Not started (server.js missing from the bundle)" }
         if let code = exitCode { return "Server exited with code \(code). Relaunch the app to restart it." }
+        if sharedOnLAN, let url = lanURL { return "Sharing on this network at \(url)" }
         return "Server process running"
     }
 
@@ -50,6 +132,23 @@ enum NodeServer {
             NSLog("StremioX: server.js not found in bundle, streaming server disabled")
             return
         }
+        started = true
+        spawn(nodeBin: nodeBin, scriptPath: serverJs)
+    }
+
+    /// Terminate the running node process (if any) and relaunch it. Used when the LAN-sharing
+    /// toggle flips, so the new bind (loopback vs all-interfaces) takes effect without an app
+    /// restart. No-op if the server was never eligible to start (missing binary / disabled).
+    static func restart() {
+        guard !PlaybackSettings.torrentsDisabled,
+              let nodeBin = Bundle.main.path(forResource: "node-darwin-arm64", ofType: nil),
+              let serverJs = Bundle.main.path(forResource: "server", ofType: "js") else { return }
+        if let proc = process, proc.isRunning {
+            proc.terminationHandler = nil   // expected stop; don't surface it as a crash
+            proc.terminate()
+        }
+        process = nil
+        exitCode = nil
         started = true
         spawn(nodeBin: nodeBin, scriptPath: serverJs)
     }
@@ -75,13 +174,35 @@ enum NodeServer {
 
         // Tee console + uncaught errors to a log file (the server's own stdout/stderr are also
         // redirected to it below). Lets a dead/misbehaving server explain itself in Settings.
+        //
+        // It also gates the bind address: server.js always calls `server.listen(port)` with no
+        // host, which Node interprets as 0.0.0.0 (every interface) -- i.e. ALWAYS LAN-reachable.
+        // We don't want that unless the user opted in. The preload monkeypatches
+        // net.Server.prototype.listen so that, when sharing is OFF, any host-less listen is
+        // pinned to 127.0.0.1 (loopback only, the original private behaviour). When sharing is
+        // ON we leave Node's default, so the Mac serves the whole LAN. The server still computes
+        // its own enginefs.baseUrl from ip.address(), which we surface in Settings as the LAN URL.
+        let bindHost = sharedOnLAN ? "0.0.0.0" : "127.0.0.1"
         let preloadPath = (home as NSString).appendingPathComponent("stremiox-preload.js")
         let preload = """
         const fs=require('fs'),L=\(jsString(logPath));
         const w=(t,a)=>{try{fs.appendFileSync(L,t+' '+Array.prototype.map.call(a,String).join(' ')+'\\n')}catch(e){}};
         process.on('uncaughtException',function(e){w('[uncaught]',[e&&e.stack||e])});
         process.on('unhandledRejection',function(e){w('[rej]',[e&&e.stack||e])});
-        w('[boot]',['mac preload active']);
+        try{
+          const net=require('net'),HOST=\(jsString(bindHost)),orig=net.Server.prototype.listen;
+          net.Server.prototype.listen=function(){
+            const a=Array.prototype.slice.call(arguments);
+            // Only rewrite the simple `listen(port[, cb])` form server.js uses for the HTTP(S)
+            // endpoints. If a host (string 2nd arg) or an options object is already given, leave it.
+            if(typeof a[0]==='number' && (a.length===1 || typeof a[1]==='function')){
+              const cb=a[1]; a[1]=HOST; if(cb)a[2]=cb;
+              w('[bind]',['listen',a[0],'->',HOST]);
+            }
+            return orig.apply(this,a);
+          };
+          w('[boot]',['mac preload active; bind='+HOST]);
+        }catch(e){w('[bind-err]',[e&&e.stack||e]);}
         """
         try? preload.write(toFile: preloadPath, atomically: true, encoding: .utf8)
 
@@ -105,6 +226,19 @@ enum NodeServer {
         env["CASTING_DISABLED"] = "1"
         // More libuv workers for tracker DNS + the engine's disk/crypto (same rationale as iOS).
         env["UV_THREADPOOL_SIZE"] = "16"
+        // Point the server at a real ffmpeg/ffprobe so HLS transcoding works and VideoToolbox
+        // hardware acceleration (h264_videotoolbox / hevc_videotoolbox) kicks in. server.js's
+        // built-in search misses Homebrew's Apple-silicon prefix, so without this it finds no
+        // ffmpeg and transcoding is a silent no-op. FFMPEG_BIN / FFPROBE_BIN are the first paths
+        // server.js consults. With ffmpeg present it auto-profiles the darwin `videotoolbox`
+        // hw-accel on boot (transcodeHardwareAccel defaults on) and uses the GPU encoders.
+        if let bins = ffmpegBinaries() {
+            env["FFMPEG_BIN"] = bins.ffmpeg
+            env["FFPROBE_BIN"] = bins.ffprobe
+            NSLog("StremioX: ffmpeg for transcoding: \(bins.ffmpeg) (VideoToolbox hw-accel)")
+        } else {
+            NSLog("StremioX: no ffmpeg found; HLS transcoding disabled (install via `brew install ffmpeg`)")
+        }
         proc.environment = env
 
         // Redirect the node process's own stdout/stderr to the same log file we tee console into.

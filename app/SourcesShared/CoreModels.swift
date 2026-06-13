@@ -214,12 +214,55 @@ struct CoreMetaItem: Decodable {
     let runtime: String?
     let links: [CoreLink]?
     let videos: [CoreVideo]?
+    /// Trailer streams the meta add-on attached (camelCase `trailerStreams` in the engine JSON).
+    /// Each is a full `Stream`, so a YouTube trailer flattens to a top-level `ytId` (see
+    /// `meta_item.rs` / `serialize_meta_details.rs`). Optional so sparser add-ons still decode.
+    let trailerStreams: [CoreStream]?
 
     var genres: [String] {
         (links ?? []).filter { $0.category.caseInsensitiveCompare("Genre") == .orderedSame }.map(\.name)
     }
     var imdbRating: String? {
         (links ?? []).first { $0.category.caseInsensitiveCompare("imdb") == .orderedSame }?.name
+    }
+
+    /// The first trailer's YouTube id, if the meta carries a playable YouTube trailer. Stremio metas
+    /// expose trailers via `trailerStreams` whose source is a YouTube id; some older add-ons only
+    /// fill `links` with a "Trailer" category pointing at a youtube.com URL, so fall back to that.
+    var trailerYouTubeID: String? {
+        if let yt = (trailerStreams ?? []).compactMap(\.ytId).first(where: { !$0.isEmpty }) {
+            return yt
+        }
+        let trailerLink = (links ?? []).first {
+            $0.category.caseInsensitiveCompare("Trailer") == .orderedSame
+        }
+        return trailerLink.flatMap { Self.youTubeID(from: $0.name) }
+    }
+
+    /// Extract a YouTube video id from a watch / share / embed URL (or a bare 11-char id).
+    static func youTubeID(from string: String) -> String? {
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let url = URL(string: trimmed), let host = url.host?.lowercased() {
+            if host.contains("youtu.be") {
+                let id = url.lastPathComponent
+                return id.isEmpty ? nil : id
+            }
+            if host.contains("youtube.com") {
+                if let v = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first(where: { $0.name == "v" })?.value, !v.isEmpty {
+                    return v
+                }
+                // /embed/<id>, /shorts/<id>, /v/<id>
+                let last = url.lastPathComponent
+                return last.isEmpty ? nil : last
+            }
+        }
+        // Bare 11-character YouTube id.
+        let idChars = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-")
+        if trimmed.count == 11, trimmed.unicodeScalars.allSatisfy({ idChars.contains($0) }) {
+            return trimmed
+        }
+        return nil
     }
 }
 

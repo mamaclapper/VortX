@@ -11,16 +11,30 @@ enum LinkAuthService {
 
     private static let base = "https://link.stremio.com/api/v2"
 
-    static func create() async throws -> LinkCode {
-        let response: APIResponse<LinkCodeDTO> = try await get("create?type=Create")
-        guard let result = response.result else {
-            throw LinkAuthError.server(response.error?.message ?? "Could not create a sign-in code.")
-        }
-        return LinkCode(code: result.code, link: result.link, qrcode: result.qrcode)
+    /// The link `read` endpoint answers HTTP 200 with `{"error":{"code":101,...}}` for the entire
+    /// window before the user finishes the browser/QR step. That is the *pending* signal, not a
+    /// failure — only this code may be polled past. Any other error (or a transport fault) is real
+    /// and must be surfaced, otherwise the panel spins on "Waiting for sign-in…" forever.
+    private static let pendingErrorCode = 101
+
+    /// Outcome of one poll: still waiting, or the auth key arrived. Genuine failures `throw` instead.
+    enum ReadResult {
+        case pending
+        case authKey(String)
     }
 
-    /// Returns nil while the user has not completed the browser/QR flow yet.
-    static func read(code: String) async throws -> String? {
+    static func create() async throws -> LinkCode {
+        let response: APIResponse<LinkCodeDTO> = try await get("create?type=Create")
+        if let result = response.result {
+            return LinkCode(code: result.code, link: result.link, qrcode: result.qrcode)
+        }
+        throw LinkAuthError.server(response.error?.message ?? "Could not create a sign-in code.")
+    }
+
+    /// One poll of the link `read` endpoint. Returns `.pending` while the user has not completed the
+    /// browser/QR flow yet, `.authKey` once Stremio hands back the session key, and throws for any
+    /// genuine server or transport error so the caller can show it instead of polling silently.
+    static func read(code: String) async throws -> ReadResult {
         let encoded = code.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? code
         guard let url = URL(string: "\(base)/read?type=Read&code=\(encoded)") else {
             throw LinkAuthError.badURL
@@ -31,9 +45,19 @@ enum LinkAuthService {
         request.cachePolicy = .reloadIgnoringLocalCacheData
         let (data, response) = try await URLSession.shared.data(for: request)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            return nil
+            throw LinkAuthError.server("Link service returned HTTP \(http.statusCode).")
         }
-        return try? JSONDecoder().decode(APIResponse<LinkDataDTO>.self, from: data).result?.authKey
+        let decoded = try JSONDecoder().decode(APIResponse<LinkDataDTO>.self, from: data)
+        if let authKey = decoded.result?.authKey, !authKey.isEmpty {
+            return .authKey(authKey)
+        }
+        if let error = decoded.error {
+            // The code-not-yet-linked sentinel is expected; everything else is a real failure.
+            if error.code == pendingErrorCode { return .pending }
+            throw LinkAuthError.server(error.message ?? "Sign-in could not be completed.")
+        }
+        // No key and no error => still pending (defensive; the API uses the 101 error above).
+        return .pending
     }
 
     private static func get<T: Decodable>(_ path: String) async throws -> T {
@@ -56,6 +80,7 @@ enum LinkAuthService {
 
     private struct APIError: Decodable {
         let message: String?
+        let code: Int?
     }
 
     private struct LinkCodeDTO: Decodable {
