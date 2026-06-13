@@ -157,7 +157,9 @@ struct TVPlayerView: View {
                             if d > 0, !hasStartedPlaying {            // playback actually began
                                 hasStartedPlaying = true; loadTimeout?.cancel(); recoveryDeadline?.cancel(); recoveryDeadline = nil; loadFailed = false
                                 autoRetryCount = 0; reconnecting = false; autoRetryTask?.cancel()   // playback started: clear auto-recovery
-                                if let m = curMeta, let u = curURL {   // remember the working link for direct resume
+                                // Live has no resumable position, so don't seed Continue-Watching direct-resume
+                                // for it (mirrors PlayerScreen.recordLastStream's live guard).
+                                if !isCurrentLiveStream, let m = curMeta, let u = curURL {   // remember the working link for direct resume
                                     LastStreamStore.record(libraryId: m.libraryId, entry: .init(
                                         videoId: m.videoId, url: u.absoluteString, title: curTitle,
                                         season: m.season, episode: m.episode, name: m.name,
@@ -168,7 +170,9 @@ struct TVPlayerView: View {
                             }
                             currentTime = d
                             updateCurrentSkip(at: d)
-                            if lastSaved < 0 || abs(d - lastSaved) >= 20 {   // persist ~every 20s
+                            // Live: no progress is persisted (saveProgress no-ops) and nothing is reported
+                            // to the engine — a live stream has no meaningful watch position.
+                            if !isCurrentLiveStream, lastSaved < 0 || abs(d - lastSaved) >= 20 {   // persist ~every 20s
                                 lastSaved = d
                                 saveProgress(at: d)
                                 core.reportProgress(timeSeconds: d, durationSeconds: duration)   // live -> engine
@@ -275,8 +279,10 @@ struct TVPlayerView: View {
         }
         .onDisappear {
             hideTask?.cancel(); loadTimeout?.cancel(); recoveryDeadline?.cancel(); autoRetryTask?.cancel(); skipFetchTask?.cancel(); stallWatchdog?.cancel()
-            saveProgress(at: currentTime)
-            core.reportProgress(timeSeconds: currentTime, durationSeconds: duration)   // flush final position to the engine
+            saveProgress(at: currentTime)   // no-op for live
+            if !isCurrentLiveStream {
+                core.reportProgress(timeSeconds: currentTime, durationSeconds: duration)   // flush final position (never for live)
+            }
             if let hash = currentTorrentHash { closeTorrent(hash: hash) }   // free the engine when the player closes
             UIApplication.shared.isIdleTimerDisabled = false   // let the screensaver resume once the player closes
         }
@@ -378,6 +384,16 @@ struct TVPlayerView: View {
     /// into the controls" work, replacing the old flat left/right-only list.
     private func vertical(_ d: Int) {
         commitScrubIfNeeded()
+        // Live has no scrubber row (it shows a LIVE indicator instead), so up/down skips straight
+        // between the close button and the transport row, never landing on the absent `.scrub`.
+        if isCurrentLiveStream {
+            switch selected {
+            case .close: if d > 0 { selected = lastButton }
+            default:     if d < 0 { selected = .close }
+            }
+            flashControls()
+            return
+        }
         switch selected {
         case .close:
             if d > 0 { selected = .scrub }
@@ -488,12 +504,19 @@ struct TVPlayerView: View {
             Spacer()
 
             VStack(spacing: Theme.Space.lg) {
-                HStack(spacing: Theme.Space.md) {
-                    Text(timeString(scrubbing ? scrubTarget : currentTime)).font(.callout.monospacedDigit())
-                        .foregroundStyle(scrubbing ? Theme.Palette.accent : Theme.Palette.textPrimary)
-                    scrubber
-                    Text(timeString(duration)).font(.callout.monospacedDigit())
-                        .foregroundStyle(Theme.Palette.textSecondary)
+                if isCurrentLiveStream {
+                    // Live: no seekable scrubber (there's no fixed duration to scrub within), just a
+                    // LIVE indicator. The user pauses/resumes; there's nothing to seek to. The `.scrub`
+                    // control row is unreachable for live (see vertical()), so this stays presentation-only.
+                    liveIndicator
+                } else {
+                    HStack(spacing: Theme.Space.md) {
+                        Text(timeString(scrubbing ? scrubTarget : currentTime)).font(.callout.monospacedDigit())
+                            .foregroundStyle(scrubbing ? Theme.Palette.accent : Theme.Palette.textPrimary)
+                        scrubber
+                        Text(timeString(duration)).font(.callout.monospacedDigit())
+                            .foregroundStyle(Theme.Palette.textSecondary)
+                    }
                 }
                 ZStack {
                     HStack(spacing: Theme.Space.md) {
@@ -552,6 +575,25 @@ struct TVPlayerView: View {
             // out and stuttering against the next; slightly longer when not scrubbing so the play head
             // drifts smoothly between the position updates.
             .animation(scrubbing ? .linear(duration: 0.16) : .linear(duration: 0.28), value: frac)
+        }
+        .frame(height: 28)
+    }
+
+    /// The Live position indicator shown in place of the scrubber: a red dot + "LIVE", and a running
+    /// elapsed timer so the user can still see playback is advancing. Mirrors PlayerScreen.liveIndicator.
+    private var liveIndicator: some View {
+        HStack(spacing: Theme.Space.md) {
+            HStack(spacing: 9) {
+                Circle().fill(Theme.Palette.danger).frame(width: 12, height: 12)
+                Text("LIVE").font(.callout.weight(.heavy)).foregroundStyle(Theme.Palette.textPrimary).tracking(1.5)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .background(.black.opacity(0.4), in: Capsule())
+            Spacer(minLength: 0)
+            if currentTime > 0 {
+                Text(timeString(currentTime)).font(.callout.monospacedDigit())
+                    .foregroundStyle(Theme.Palette.textSecondary)
+            }
         }
         .frame(height: 28)
     }
@@ -1331,7 +1373,7 @@ struct TVPlayerView: View {
     /// EOF-reconnect loop so episodes could never finish or auto-advance.
     private func isLiveMeta(_ meta: PlaybackMeta?) -> Bool {
         guard let type = meta?.type else { return false }
-        return type == "tv" || type == "channel" || type == "events"
+        return LiveTypes.contains(type)   // shared definition of "live" (tv / channel / events)
     }
 
     // MARK: - Skip intro / outro (chapter-derived; AniSkip crowd-sourced timings can feed the same model later)
@@ -1630,7 +1672,10 @@ struct TVPlayerView: View {
     // MARK: - Playback helpers
 
     /// Seek to the saved position once BOTH the resume offset is fetched and the duration is known.
+    /// No-op for live: a live stream's "position" is just elapsed buffer wall-clock, so seeking into a
+    /// stored offset is meaningless (and would jump into the past). Mirrors PlayerScreen's live guard.
     private func maybeResume() {
+        guard !isCurrentLiveStream else { return }
         guard !appliedResume, duration > 0, let r = resumeSeconds else { return }
         appliedResume = true
         guard r > 5, r < duration - 10 else { return }   // ignore trivial / near-end positions
@@ -1639,8 +1684,11 @@ struct TVPlayerView: View {
         lastSaved = r
     }
 
-    /// Persist the current position to the account library (no-op without a library context).
+    /// Persist the current position to the account library (no-op without a library context). Also a
+    /// no-op for live: persisting a live "position" would seed a bogus resume offset / fake Continue
+    /// Watching entry the next time the channel opens. Mirrors PlayerScreen's live progress suppression.
     private func saveProgress(at position: Double) {
+        guard !isCurrentLiveStream else { return }
         guard let m = curMeta, duration > 0, position >= 0 else { return }
         let dur = duration
         Task { await account.saveProgress(for: m, positionSeconds: position, durationSeconds: dur) }

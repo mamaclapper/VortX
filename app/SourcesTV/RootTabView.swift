@@ -115,7 +115,7 @@ struct RootTabView: View {
     // changes that tab's view identity, so the next time you open it SwiftUI rebuilds it fresh at
     // its root instead of re-showing the detail page you had pushed (the "Search still shows the
     // series I opened" bug). Cheap because the data lives in CoreBridge, not in the view.
-    @State private var resetTokens = [Int](repeating: 0, count: 6)
+    @State private var resetTokens = [Int](repeating: 0, count: 7)
 
     var body: some View {
         TabView(selection: $selection) {
@@ -123,6 +123,11 @@ struct RootTabView: View {
                 .tabItem { Label("Home", systemImage: "house.fill") }.tag(0)
             DiscoverView().id(resetTokens[1])
                 .tabItem { Label("Discover", systemImage: "safari.fill") }.tag(1)
+            // Live TV sits after Discover. Tags 0–5 were already taken (Search uses 4, Add-ons 3),
+            // so Live takes the next free tag 6 and reset slot 6 — the selection-reset .onChange
+            // below stays in bounds against the resized 7-slot array.
+            LiveView().id(resetTokens[6])
+                .tabItem { Label("Live", systemImage: "dot.radiowaves.left.and.right") }.tag(6)
             LibraryView().id(resetTokens[2])
                 .tabItem { Label("Library", systemImage: "books.vertical.fill") }.tag(2)
             NavigationStack { SearchView() }.id(resetTokens[4])
