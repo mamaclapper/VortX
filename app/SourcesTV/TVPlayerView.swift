@@ -251,7 +251,7 @@ struct TVPlayerView: View {
                 // Direct resume launches with no meta loaded: fetch it behind playback
                 // so the sources panel shows THIS title (not whatever detail page was
                 // open last), and series get their episode list for Next/auto-advance.
-                Task {
+                Task { @MainActor in
                     core.loadMeta(type: m.type, id: m.libraryId, streamType: m.type, streamId: m.videoId)
                     guard m.type == "series" else { return }
                     for _ in 0..<40 {
@@ -271,7 +271,7 @@ struct TVPlayerView: View {
                 if let engineResume = core.engineResumeSeconds(for: m) {
                     resumeSeconds = engineResume; maybeResume()       // engine library = source of truth
                 } else {
-                    Task { resumeSeconds = await account.resumeOffset(for: m); maybeResume() }
+                    Task { @MainActor in resumeSeconds = await account.resumeOffset(for: m); maybeResume() }
                 }
             } else {
                 resumeSeconds = 0   // selftest / no library context, nothing to resume
@@ -1606,6 +1606,11 @@ struct TVPlayerView: View {
         guard preloaded?.episodeID != next.id, preloadingID != next.id else { return }
         preloadingID = next.id
         let sources = account.streamSources
+        // Snapshot the main-actor @State continuity hints here (on the main actor) so the background
+        // Task never reads them off-main; the heavy fetch + ranking stays off-main and only the @State
+        // writes hop back to the main actor.
+        let hint = curHint
+        let binge = curBinge
         plog.info("preloading next episode \(next.id, privacy: .public) from \(sources.count, privacy: .public) add-ons")
         Task {
             var groups: [CoreStreamSourceGroup] = []
@@ -1621,15 +1626,19 @@ struct TVPlayerView: View {
                                    uniquingKeysWith: { first, _ in first })
             groups.sort { (order[$0.id] ?? .max) < (order[$1.id] ?? .max) }
             let withBinge = groups.flatMap { $0.streams }.filter { ($0.behaviorHints?.bingeGroup?.isEmpty == false) }.count
-            DiagnosticsLog.log("binge", "preload next ep: want binge=\(curBinge ?? "nil"), \(withBinge) of \(groups.flatMap { $0.streams }.count) streams carry a bingeGroup")
-            if let best = StreamRanking.best(groups, continuity: curHint, binge: curBinge) {
-                preloaded = PreloadedEpisode(episodeID: next.id, stream: best, signature: StreamRanking.signature(best),
-                                             bingeGroup: best.behaviorHints?.bingeGroup)
-                plog.info("preload ready: \(StreamRanking.qualityLabel(best), privacy: .public) for \(next.id, privacy: .public)")
-            } else {
-                plog.info("preload found nothing for \(next.id, privacy: .public)")
+            DiagnosticsLog.log("binge", "preload next ep: want binge=\(binge ?? "nil"), \(withBinge) of \(groups.flatMap { $0.streams }.count) streams carry a bingeGroup")
+            let best = StreamRanking.best(groups, continuity: hint, binge: binge)
+            // @State writes go back on the main actor (the fetch + rank above intentionally ran off-main).
+            await MainActor.run {
+                if let best {
+                    preloaded = PreloadedEpisode(episodeID: next.id, stream: best, signature: StreamRanking.signature(best),
+                                                 bingeGroup: best.behaviorHints?.bingeGroup)
+                    plog.info("preload ready: \(StreamRanking.qualityLabel(best), privacy: .public) for \(next.id, privacy: .public)")
+                } else {
+                    plog.info("preload found nothing for \(next.id, privacy: .public)")
+                }
+                preloadingID = nil
             }
-            preloadingID = nil
         }
     }
 
