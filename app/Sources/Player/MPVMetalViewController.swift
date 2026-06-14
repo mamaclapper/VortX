@@ -491,6 +491,15 @@ final class MPVMetalViewController: PlatformViewController {
         headers: [String: String]? = nil,
         live: Bool = false
     ) {
+        // Re-arm HDR detection for THIS file. appliedDynamicRange otherwise persists from the previous
+        // file (only stop() clears it), so an in-place episode / source switch left it stale and the
+        // sig-peak observer's `range != appliedDynamicRange` guard SKIPPED re-applying the colorspace —
+        // the new (HDR) episode then kept rendering in the previous SDR output (dull) until a full replay
+        // rebuilt the player. That is the random "an auto-advanced / skipped episode is washed out" report
+        // on iOS and tvOS. Resetting to .sdr WITHOUT touching the live layer colorspace lets the new
+        // file's sig-peak event re-apply the correct range; a same-range file keeps its correct tag, so
+        // nothing flickers. (HDR can only be verified on a real HDR display, not the Simulator.)
+        appliedDynamicRange = .sdr
         var args = [url.absoluteString]
         var options = [String]()
 
