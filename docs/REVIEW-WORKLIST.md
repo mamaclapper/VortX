@@ -335,5 +335,18 @@ Verify: iPad portrait + landscape + Split View and a resized Mac window show a r
 
 Notes: items 80-82 (dead code, access-control, working-as-designed) fold into whichever phase touches those files. Anything tagged tvOS-only (splash) is independent and can ship anytime. The user-reported clipping is Phase 1 — if a single hotfix is wanted, ship Phase 0 + Phase 1 together.
 
+## macOS-specific (added 2026-06-14, dedicated macOS audit — beyond S2/S8/#13/#14/#15)
+- [ ] **[high] mac-intel-no-torrent-engine** — Intel Macs lose ALL torrent playback: bundled `node` is arm64-only (`fetch-node-macos.sh:14-19`, `MacNodeServer` resolves `node-darwin-arm64` with no x86_64 fallback). Fix: lipo a universal node, OR pin ARCHS=arm64 + runtime "torrent server unavailable on Intel" state (not an infinite spinner).
+- [ ] **[high] mac-window-close-does-not-quit** — red-close/Cmd-W closes the window but the app + node server keep running headless (port 11470 held), no way back. `MacAppDelegate` (StremioXiOSApp.swift:79-83) lacks `applicationShouldTerminateAfterLastWindowClosed -> true`. Trivial fix.
+- [ ] **[med] mac-cursor-never-hides-during-playback** — arrow cursor floats over the video forever (no `NSCursor.setHiddenUntilMouseMoves`). Pair with controls auto-hide.
+- [ ] **[med] mac-no-pointing-hand-cursor** — cards/chips/rows/tabs (all `.buttonStyle(.plain)`) show the arrow, not the hand → nothing reads clickable. Add `.pointerStyle(.link)`/onHover NSCursor on shared wrappers.
+- [ ] **[med] mac-multiple-searchable-toolbars** — opacity-ZStack mounts all 7 tab NavigationStacks at once, so the Search tab's `.searchable` leaks into the window titlebar regardless of active tab (only the wordmark was `isActive`-gated). Compounds S2. Gate `.searchable` by isActive or mount only the active stack.
+- [ ] **[med] mac-no-return-to-submit** — Return doesn't submit Sign-In / Open-Link / Server-URL fields (no `.onSubmit`); Mac users have only a hardware keyboard.
+- [ ] **[med] mac-no-double-click-fullscreen** — no double-click→fullscreen and (with S2) no way at all to make the video truly fullscreen on Mac. Fix with S2.
+- [ ] **[low] mac-no-scroll-wheel-trackpad-player** — no scroll-to-seek / pinch-aspect / wheel-volume over the video.
+- [ ] **[low] mac-keychain-disk-read-on-main** — sharpens #15: `Keychain.string()` does a synchronous `Data(contentsOf:)` of credentials.plist on EVERY call on the main thread (no in-memory cache). Add a cache, not just an async variant.
+
 ## Shipped
+- beta10 (build 93): S4 mark-watched/finished (CW clears), mac-window-close-quits, mac Return-to-submit (sign-in + server URL), cooler danger red, poster-card VoiceOver labels.
 - beta9 (build 92): S1 viewport clipping (all screens), S5b adaptive onAccent, #3/#4 crash guards, S10 isSignedIn guard.
+- (false positive) #12 appliedInitialResume: NOT a bug — intentionally not reset (switches resume via nudgeResume; resetting would yank a mid-playback switch to 0:00). Working as designed.
