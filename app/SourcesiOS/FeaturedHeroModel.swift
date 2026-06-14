@@ -268,13 +268,23 @@ struct FeaturedHeroItem: Identifiable, Equatable, Hashable {
         return "https://images.metahub.space/background/big/\(id)/img"
     }
 
+    /// Stremio's standard logo art (transparent PNG) for an IMDB-identified title, so the hero can show
+    /// the show's LOGO as its title immediately, without waiting on (or depending on) the async meta
+    /// enrichment. Enrichment still upgrades it to the add-on's own logo when one resolves; if metahub
+    /// has no logo for the id the AsyncImage fails and `titleOrLogo` falls back to the styled serif name.
+    /// Nil for non-IMDB ids (tmdb:/tvdb:/kitsu:), which only metahub-by-IMDB can't cover.
+    static func metahubLogo(forId id: String) -> String? {
+        guard id.hasPrefix("tt") else { return nil }
+        return "https://images.metahub.space/logo/medium/\(id)/img"
+    }
+
     /// Seed from a catalog meta (carries its own `background` + preview fields when the add-on filled
     /// them; falls back to metahub-by-IMDB / poster otherwise).
     static func from(meta: CoreMeta) -> FeaturedHeroItem {
         FeaturedHeroItem(
             id: meta.id, type: meta.type, name: meta.name, poster: meta.poster,
             backdrop: meta.background ?? metahubBackground(forId: meta.id) ?? meta.poster,
-            logo: nil, description: meta.description, releaseInfo: meta.releaseInfo,
+            logo: metahubLogo(forId: meta.id), description: meta.description, releaseInfo: meta.releaseInfo,
             runtime: nil, imdbRating: meta.imdbRating, genres: meta.genres ?? [],
             trailerYouTubeID: nil)
     }
@@ -286,7 +296,7 @@ struct FeaturedHeroItem: Identifiable, Equatable, Hashable {
         FeaturedHeroItem(
             id: cw.id, type: cw.type, name: cw.name, poster: cw.poster,
             backdrop: metahubBackground(forId: cw.id) ?? cw.poster,
-            logo: nil, description: nil, releaseInfo: nil,
+            logo: metahubLogo(forId: cw.id), description: nil, releaseInfo: nil,
             runtime: nil, imdbRating: nil, genres: [],
             trailerYouTubeID: nil)
     }
@@ -297,7 +307,7 @@ struct FeaturedHeroItem: Identifiable, Equatable, Hashable {
         FeaturedHeroItem(
             id: rail.id, type: rail.type, name: rail.name, poster: rail.poster,
             backdrop: rail.background ?? metahubBackground(forId: rail.id) ?? rail.poster,
-            logo: nil, description: rail.description, releaseInfo: rail.releaseInfo,
+            logo: metahubLogo(forId: rail.id), description: rail.description, releaseInfo: rail.releaseInfo,
             runtime: nil, imdbRating: rail.imdbRating, genres: rail.genres ?? [],
             trailerYouTubeID: nil)
     }
