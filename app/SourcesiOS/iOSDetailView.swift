@@ -1571,7 +1571,10 @@ private struct iOSStreamLabel: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     badge(quality, prominent: true)
-                    badge(addon.uppercased())
+                    // Skip the add-on badge when it only repeats the resolution: some add-on configs are
+                    // literally named "1080p" / "4K", which rendered as a second quality pill next to the
+                    // one above (the reported double tag). Real add-on names still show.
+                    if addon.uppercased() != quality.uppercased() { badge(addon.uppercased()) }
                     if stream.isTorrent { badge("TORRENT") }
                 }
                 // Parsed flavour tags + size — the clean line tvOS shows, minus the resolution (it is
