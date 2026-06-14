@@ -90,7 +90,47 @@ struct StremioXiOSApp: App {
         #if os(macOS)
         .defaultSize(width: 1280, height: 820)
         .windowResizability(.contentMinSize)
+        .commands {
+            // Single-window media app: the document-style File ▸ New does nothing here, so drop it.
+            CommandGroup(replacing: .newItem) { }
+            // Conventional macOS Preferences slot (app menu, ⌘,) → the Settings tab.
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") { MacCommands.go(.settings) }
+                    .keyboardShortcut(",", modifiers: .command)
+            }
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { UpdateChecker.shared.checkIfStale(maxAge: 0) }
+            }
+            // Tab navigation, the menu-bar twin of the bottom tab bar (commands live at the Scene
+            // level, so they post to MacCommands and iOSRootView maps it to its tab selection).
+            CommandMenu("Go") {
+                Button("Home")     { MacCommands.go(.home) }.keyboardShortcut("1", modifiers: .command)
+                Button("Discover") { MacCommands.go(.discover) }.keyboardShortcut("2", modifiers: .command)
+                Button("Live TV")  { MacCommands.go(.live) }.keyboardShortcut("3", modifiers: .command)
+                Button("Library")  { MacCommands.go(.library) }.keyboardShortcut("4", modifiers: .command)
+                Button("Add-ons")  { MacCommands.go(.addons) }.keyboardShortcut("5", modifiers: .command)
+                Divider()
+                Button("Search")   { MacCommands.go(.search) }.keyboardShortcut("f", modifiers: .command)
+            }
+        }
         #endif
+    }
+}
+
+/// macOS menu-bar command bridge. The menu commands live at the SwiftUI `Scene` level, outside the
+/// view tree, so they cannot touch iOSRootView's `@State tab` directly — they post a notification the
+/// root view observes and maps to its tab selection. Tiny and platform-neutral so it compiles on every
+/// SourcesiOS target even though only macOS builds a menu bar.
+enum MacCommands {
+    /// Posted with a `tab` userInfo `Int` matching `iOSRootView.Tab.rawValue`.
+    static let tabRequest = Notification.Name("stremiox.macCommands.tabRequest")
+
+    /// Menu destinations. Raw values MUST mirror iOSRootView.Tab's order
+    /// (home, discover, live, library, search, addons, settings).
+    enum Destination: Int { case home, discover, live, library, search, addons, settings }
+
+    static func go(_ destination: Destination) {
+        NotificationCenter.default.post(name: tabRequest, object: nil, userInfo: ["tab": destination.rawValue])
     }
 }
 

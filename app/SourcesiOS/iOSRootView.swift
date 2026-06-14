@@ -76,6 +76,13 @@ struct iOSRootView: View {
         }
         .background(Theme.Palette.canvas.ignoresSafeArea())
         .tint(Theme.Palette.accent)
+        #if os(macOS)
+        // macOS menu-bar commands (the "Go" menu + ⌘-shortcuts) post here, since they live at the
+        // Scene level and can't set this @State directly. The raw value mirrors Tab's order.
+        .onReceive(NotificationCenter.default.publisher(for: MacCommands.tabRequest)) { note in
+            if let raw = note.userInfo?["tab"] as? Int, let dest = Tab(rawValue: raw) { tab = dest }
+        }
+        #endif
     }
 
     /// Brand-styled bottom bar: seven equal items, each a small SF Symbol over a caption label. The
