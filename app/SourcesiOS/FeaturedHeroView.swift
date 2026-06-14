@@ -96,6 +96,8 @@ struct FeaturedHeroView: View {
             LinearGradient(colors: [Theme.Palette.canvas.opacity(0.6), .clear],
                            startPoint: .leading, endPoint: .center)
         )
+        // Purely decorative art + scrims — hide from VoiceOver so the title/meta read first.
+        .accessibilityHidden(true)
     }
 
     /// The poster painted behind the backdrop so the band is never flat black. Falls to canvas only
@@ -109,8 +111,11 @@ struct FeaturedHeroView: View {
                     Theme.Palette.canvas
                 }
             }
+            // Decorative backdrop filler — never announced by VoiceOver.
+            .accessibilityHidden(true)
         } else {
             Theme.Palette.canvas
+                .accessibilityHidden(true)
         }
     }
 
@@ -143,6 +148,8 @@ struct FeaturedHeroView: View {
                     img.resizable().aspectRatio(contentMode: .fit)
                         .frame(maxWidth: 320, maxHeight: 110, alignment: .leading)
                         .shadow(color: .black.opacity(0.45), radius: 10, y: 4)
+                        // The logo is the title in image form — read the name, not the URL.
+                        .accessibilityLabel(hero.name)
                 default:
                     heroTitle(hero)
                 }
@@ -176,6 +183,8 @@ struct FeaturedHeroView: View {
         }
         .font(Theme.Typography.label)
         .foregroundStyle(Theme.Palette.textSecondary)
+        // Combine the rating/year/runtime/genre tokens into one VoiceOver phrase.
+        .accessibilityElement(children: .combine)
     }
 
     /// Play (opens detail) + a Trailer chip shown only when a playable trailer resolves.

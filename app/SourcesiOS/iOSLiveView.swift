@@ -44,18 +44,13 @@ struct iOSLiveView: View {
         path.append(FeaturedHeroItem.from(meta: meta))
     }
 
+    // Route through the shared compat empty state for one consistent layout (#44). No CTA: switching
+    // to the Add-ons tab is owned by the root shell, so this stays a nudge rather than a button.
     private var emptyState: some View {
-        VStack(spacing: Theme.Space.md) {
-            Image(systemName: "dot.radiowaves.left.and.right")
-                .font(.system(size: 52)).foregroundStyle(Theme.Palette.textSecondary)
-            Text("No Live TV add-ons installed")
-                .font(Theme.Typography.sectionTitle).foregroundStyle(Theme.Palette.textPrimary)
-            Text("Install an add-on that provides live TV, channels, or events in the Add-ons tab and its channels will show up here.")
-                .font(Theme.Typography.body).foregroundStyle(Theme.Palette.textSecondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 480)
-        }
-        .frame(maxWidth: .infinity).padding(.top, 80).padding(.horizontal, Theme.Space.xl)
+        ContentUnavailableViewCompat(title: "No Live TV add-ons installed",
+            systemImage: "dot.radiowaves.left.and.right",
+            message: "Install an add-on that provides live TV, channels, or events in the Add-ons tab and its channels will show up here.")
+            .frame(minHeight: 420)
     }
 }
 

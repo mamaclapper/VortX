@@ -13,10 +13,10 @@ struct SplashView: View {
     @State private var nameIn = false
     @State private var fadingOut = false
 
-    // The brand palette (docs/brand, reconstructed in scripts/make-logo.py).
-    private static let indigo = Color(red: 26 / 255, green: 15 / 255, blue: 58 / 255)
-    private static let violetLight = Color(red: 109 / 255, green: 54 / 255, blue: 243 / 255)
-    private static let violetDark = Color(red: 83 / 255, green: 39 / 255, blue: 188 / 255)
+    // Splash honors the chosen accent (ThemeManager) instead of the legacy Stremio purple.
+    private static var indigo: Color { Theme.Palette.canvas }
+    private static var violetLight: Color { Theme.Palette.accentBright }
+    private static var violetDark: Color { Theme.Palette.accent }
 
     var body: some View {
         ZStack {

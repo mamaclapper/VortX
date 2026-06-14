@@ -107,6 +107,8 @@ struct PlayerScreen: View {
     @State private var metadataLine = ""        // "4K · HDR · EAC3"-style line shown under the title
     @State private var controlsVisible = true
     @State private var scrubbing = false
+    @State private var scrubTarget: Double = 0   // committed scrub position while dragging; avoids timePos fighting the thumb (#32)
+    @State private var refreshTask: Task<Void, Never>?   // debounced panel/track refresh; cancellable so it can't outlive the player (#20)
     #if os(macOS)
     /// Display-sleep assertion held while the player is open (macOS parity with the iOS idle-timer
     /// disable): keeps the Mac from dimming / sleeping mid-movie. Ended on disappear.
@@ -189,13 +191,19 @@ struct PlayerScreen: View {
             // a SwiftUI contentShape layer catches every tap. The controls sit above it, so their
             // buttons still work and a tap on empty space falls through here to toggle.
             Color.clear.contentShape(Rectangle()).onTapGesture { toggleControls() }.ignoresSafeArea()
+                .accessibilityLabel("Show player controls")
+                .accessibilityAction { toggleControls() }
 
             if (buffering || reconnecting) && !loadFailed { bufferingOverlay }
 
             // Skip pill shows only while watching (controls hidden), mirroring tvOS.
             if let seg = currentSkip, !controlsVisible, panel == nil, !loadFailed { skipPill(seg) }
 
-            if controlsVisible && !loadFailed { controls.transition(.opacity) }
+            // Render controls UNCONDITIONALLY (just faded/non-interactive when hidden) so VoiceOver can
+            // still reach them when auto-hidden — otherwise a hidden bar drops out of the a11y tree (#31).
+            if !loadFailed {
+                controls.opacity(controlsVisible ? 1 : 0).allowsHitTesting(controlsVisible)
+            }
 
             if let panel { selectionSheet(panel) }
 
@@ -224,6 +232,15 @@ struct PlayerScreen: View {
                 .transition(.opacity)
                 .zIndex(100)
             }
+
+            #if os(macOS)
+            // The visible pre-start close button vanishes once playback starts, taking its
+            // .cancelAction shortcut with it. macOS has no remote/Esc fallback otherwise, so keep an
+            // always-present hidden Esc handler so ⌘. / Esc closes the player at any point (#14).
+            Button { leavePlayback() } label: { EmptyView() }
+                .keyboardShortcut(.cancelAction)
+                .hidden()
+            #endif
         }
         #if os(iOS)
         .statusBarHidden(true)
@@ -245,6 +262,7 @@ struct PlayerScreen: View {
         .onDisappear {
             hideTask?.cancel(); loadTimeout?.cancel(); autoRetryTask?.cancel()
             stallWatchdog?.cancel(); recoveryDeadline?.cancel(); skipFetchTask?.cancel()
+            refreshTask?.cancel()
             #if os(iOS)
             UIApplication.shared.isIdleTimerDisabled = false  // let the screensaver / auto-lock resume once the player closes
             #elseif os(macOS)
@@ -779,7 +797,7 @@ struct PlayerScreen: View {
 
     private var topBar: some View {
         HStack(spacing: 12) {
-            iconButton("chevron.down") { leavePlayback() }
+            iconButton("chevron.down", label: "Close player") { leavePlayback() }
             if !title.isEmpty {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title).font(.headline.weight(.semibold)).foregroundStyle(.white)
@@ -792,7 +810,7 @@ struct PlayerScreen: View {
             }
             Spacer()
             if hasNext {
-                iconButton("forward.end.fill") {
+                iconButton("forward.end.fill", label: "Next episode") {
                     if duration > 0 { onProgress(currentTime, duration) }   // flush before advancing
                     onNext()
                 }
@@ -800,7 +818,7 @@ struct PlayerScreen: View {
             #if os(iOS)
             // Manual landscape lock is an iOS-only affordance (macOS windows don't rotate).
             iconButton(forcedLandscape ? "arrow.down.right.and.arrow.up.left"
-                                       : "arrow.up.left.and.arrow.down.right") {
+                                       : "arrow.up.left.and.arrow.down.right", label: "Toggle fullscreen") {
                 forcedLandscape.toggle()
                 coordinator.player?.setOrientation(landscape: forcedLandscape)
                 scheduleHide()
@@ -808,7 +826,7 @@ struct PlayerScreen: View {
             #endif
             if !isLive {
                 // Restart from 0:00 (tvOS parity #5): seek to the start and keep playing.
-                iconButton("arrow.counterclockwise") {
+                iconButton("arrow.counterclockwise", label: "Restart") {
                     coordinator.player?.seek(to: 0)
                     currentTime = 0
                     if duration > 0 { onSeek(0, duration); lastReported = 0 }
@@ -816,8 +834,8 @@ struct PlayerScreen: View {
                     scheduleHide()
                 }
             }
-            iconButton("gearshape") { openPanel(.playerSettings) }   // decoder toggle + playback info (tvOS parity #22)
-            iconButton("arrow.up.forward.app") {       // hand off to Infuse / VLC / Share
+            iconButton("gearshape", label: "Player settings") { openPanel(.playerSettings) }   // decoder toggle + playback info (tvOS parity #22)
+            iconButton("arrow.up.forward.app", label: "Play in another app") {       // hand off to Infuse / VLC / Share
                 hideTask?.cancel()
                 showExternalChooser = true
             }
@@ -836,6 +854,7 @@ struct PlayerScreen: View {
                     .font(.system(size: 50)).foregroundStyle(.white).shadow(radius: 8)
                     .frame(width: 100, height: 100)
             }
+            .accessibilityLabel(isPaused ? "Play" : "Pause")
             if !isLive {
                 seekButton("goforward.10", by: 10)
             }
@@ -853,6 +872,7 @@ struct PlayerScreen: View {
             Image(systemName: icon).font(.system(size: 30, weight: .semibold))
                 .foregroundStyle(.white).shadow(radius: 4).frame(width: 60, height: 60)
         }
+        .accessibilityLabel(delta < 0 ? "Skip back 10 seconds" : "Skip forward 10 seconds")
     }
 
     private var bottomBar: some View {
@@ -864,12 +884,18 @@ struct PlayerScreen: View {
             } else {
                 HStack(spacing: 12) {
                     Text(timeString(currentTime)).font(.caption.monospacedDigit()).foregroundStyle(.white)
-                    Slider(value: $currentTime, in: 0...max(duration, 1)) { editing in
+                    // While dragging, the thumb follows a local scrubTarget so an incoming timePos tick
+                    // can't yank it back to the (pre-seek) playback position (#32). On release we commit
+                    // scrubTarget once. Outside a drag the thumb tracks live currentTime.
+                    Slider(value: Binding(get: { scrubbing ? scrubTarget : currentTime },
+                                          set: { scrubTarget = $0 }),
+                           in: 0...max(duration, 1)) { editing in
                         scrubbing = editing
-                        if editing { hideTask?.cancel() }
+                        if editing { scrubTarget = currentTime; hideTask?.cancel() }
                         else {
-                            coordinator.player?.seek(to: currentTime)
-                            if duration > 0 { onSeek(currentTime, duration); lastReported = currentTime }
+                            currentTime = scrubTarget
+                            coordinator.player?.seek(to: scrubTarget)
+                            if duration > 0 { onSeek(scrubTarget, duration); lastReported = scrubTarget }
                             scheduleHide()
                         }
                     }.tint(Theme.Palette.accent)
@@ -924,11 +950,13 @@ struct PlayerScreen: View {
         }
     }
 
-    private func iconButton(_ systemName: String, action: @escaping () -> Void) -> some View {
+    private func iconButton(_ systemName: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: systemName).font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(.white).padding(11).background(.black.opacity(0.35), in: Circle())
+                .frame(width: 44, height: 44).contentShape(Circle())   // min 44pt tap target (#30)
         }
+        .accessibilityLabel(label)
     }
 
     // MARK: - Skip intro / outro
@@ -1017,7 +1045,9 @@ struct PlayerScreen: View {
                     Button { close() } label: {
                         Image(systemName: "xmark").font(.system(size: 13, weight: .bold))
                             .foregroundStyle(.white.opacity(0.7)).padding(7).background(.white.opacity(0.12), in: Circle())
+                            .frame(width: 44, height: 44).contentShape(Circle())   // min 44pt tap target (#30)
                     }
+                    .accessibilityLabel("Close panel")
                 }
                 .padding(.horizontal).padding(.vertical, 14)
                 Divider().overlay(.white.opacity(0.15))
@@ -1256,6 +1286,7 @@ struct PlayerScreen: View {
         withAnimation(.easeInOut(duration: 0.15)) { panel = p }
     }
     private func close() {
+        refreshTask?.cancel()   // a debounced refresh keyed to the now-closing panel must not fire (#20)
         withAnimation(.easeInOut(duration: 0.15)) { panel = nil }
         scheduleHide()
     }
@@ -1276,7 +1307,10 @@ struct PlayerScreen: View {
         subtitleTracks = coordinator.player?.tracks(ofType: "sub") ?? []
     }
     private func refreshSoon() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+        refreshTask?.cancel()
+        refreshTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
             refreshTracks()
             if let p = panel { panelRows = rows(for: p) }
             if panel == .info { infoRows = coordinator.player?.playbackStats() ?? [] }

@@ -43,6 +43,10 @@ struct StremioXiOSApp: App {
                 .environmentObject(ThemeManager.shared)
                 .environmentObject(ProfileStore.shared)
                 .preferredColorScheme(.dark)
+                // Tint the whole scene so system chrome inside separately-presented sheets (SignIn /
+                // OpenLink) and the ProfileEditor cover renders the app accent, not system blue —
+                // those presentations are their own host and don't inherit a tint set deeper in.
+                .tint(Theme.Palette.accent)
                 // Without a min frame the macOS WindowGroup adopts the root's tiny intrinsic size and
                 // opens as a postage-stamp window; pin a sensible minimum so it can't collapse. (iOS /
                 // iPadOS ignore this — their windows are managed by the system, not content size.)

@@ -4,15 +4,17 @@ import SwiftUI
 /// URLs (those carry a `url`, so no `/create` is needed). Port of the tvOS `prepareTorrent`, reusing
 /// the shared `TorrentTrackers.sources` so the create carries the TCP/TLS trackers that reach a swarm
 /// from a sandboxed app. File-private free function so both the movie list and the per-episode list
-/// share one implementation.
-private func prepareTorrentStream(_ stream: CoreStream) {
-    guard !PlaybackSettings.torrentsDisabled else { return }
+/// share one implementation. Returns the retry Task (or nil for a non-torrent / disabled prime) so the
+/// caller can store and cancel it — the backoff loop outlives the view otherwise, leaking on every pick.
+@discardableResult
+private func prepareTorrentStream(_ stream: CoreStream) -> Task<Void, Never>? {
+    guard !PlaybackSettings.torrentsDisabled else { return nil }
     guard stream.url == nil, let hash = stream.infoHash?.lowercased(),
-          let url = URL(string: "\(StremioServer.base)/\(hash)/create") else { return }
+          let url = URL(string: "\(StremioServer.base)/\(hash)/create") else { return nil }
     let sources = TorrentTrackers.sources(forHash: hash, streamSources: stream.sources)
     let body: [String: Any] = ["torrent": ["infoHash": hash],
                                "peerSearch": ["sources": sources, "min": 40, "max": 150]]
-    guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }
+    guard let data = try? JSONSerialization.data(withJSONObject: body) else { return nil }
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -22,8 +24,10 @@ private func prepareTorrentStream(_ stream: CoreStream) {
     // child `node` process), and a single fire-and-forget POST sent before it's listening is silently
     // dropped — leaving the torrent un-primed and the player hanging on a peerless swarm. A round-trip
     // that doesn't throw means the server received the create; connection-refused retries with backoff.
-    Task {
+    // The Task is returned so the owning view can cancel it on disappear / new selection.
+    return Task {
         for attempt in 0..<5 {
+            if Task.isCancelled { return }
             if (try? await URLSession.shared.data(for: request)) != nil { return }
             try? await Task.sleep(for: .seconds(Double(attempt + 1)))   // 1s,2s,3s,4s backoff over cold-start
         }
@@ -59,6 +63,8 @@ struct iOSDetailView: View {
     @State private var presentation: Presentation?
     @State private var preparing = false                 // movie Watch Now is resolving
     @State private var season = 1
+    @State private var settleTimedOut = false            // movie/live resolution gave up → "No sources found", not a spinner
+    @State private var torrentPrime: Task<Void, Never>?  // outstanding torrent /create retry loop, cancelled on disappear / new pick
 
     /// The one thing presented full-screen at a time: a resolved player stream or the YouTube trailer.
     private enum Presentation: Identifiable {
@@ -129,16 +135,23 @@ struct iOSDetailView: View {
         .background(Theme.Palette.canvas.ignoresSafeArea())
         .navigationTitle(meta?.name ?? title)
         .inlineNavigationTitle()
-        .onAppear { core.loadMeta(type: type, id: id) }
-        .onDisappear { core.unloadMeta() }
+        // Guard the meta load: the shared CoreBridge already holds this title's meta on an A -> back -> A
+        // revisit, so re-loading it churns the engine and momentarily blanks the hero for no reason.
+        .onAppear { if core.metaDetails?.meta?.id != id { core.loadMeta(type: type, id: id) } }
+        .onDisappear { core.unloadMeta(); torrentPrime?.cancel() }
+        // Flip the spinner to "No sources found" if resolution hangs past 12s (mirrors iOSEpisodeStreams).
+        .task {
+            try? await Task.sleep(for: .seconds(12))
+            settleTimedOut = true
+        }
         .platformFullScreenPlayerCover(item: $presentation) { item in
             switch item {
             case .player(let launch):
                 PlayerScreen(
                     url: launch.url, title: launch.title, headers: launch.headers, resumeSeconds: launch.resume,
                     recordMeta: launch.meta, recordQualityText: launch.qualityText, recordIsTorrent: launch.isTorrent,
-                    onProgress: { pos, dur in Task { await account.saveProgress(for: launch.meta, positionSeconds: pos, durationSeconds: dur) } },
-                    onSeek: { pos, dur in Task { await account.saveProgress(for: launch.meta, positionSeconds: pos, durationSeconds: dur) } },
+                    onProgress: { pos, dur in Task { [weak account] in await account?.saveProgress(for: launch.meta, positionSeconds: pos, durationSeconds: dur) } },
+                    onSeek: { pos, dur in Task { [weak account] in await account?.saveProgress(for: launch.meta, positionSeconds: pos, durationSeconds: dur) } },
                     onClose: { presentation = nil }
                 )
                 .ignoresSafeArea()
@@ -485,6 +498,7 @@ struct iOSDetailView: View {
             groups: StreamRanking.rankedGroups(displayGroups(core.streamGroups())),
             progress: core.streamLoadProgress(),
             states: core.streamAddonStates(),
+            settleTimedOut: settleTimedOut,
             continuity: rememberedQuality,
             play: { stream, url in Task { await playStream(stream, url: url) } }
         )
@@ -518,7 +532,7 @@ struct iOSDetailView: View {
 
     private var movieLabel: String {
         if preparing { return "Finding the best source…" }
-        guard movieReady, let s = movieBest else { return "Loading sources…" }
+        guard movieReady, let s = movieBest else { return settleTimedOut ? "No sources found" : "Loading sources…" }
         return "Watch  ·  \(StreamRanking.qualityLabel(s))"
     }
 
@@ -654,6 +668,7 @@ struct iOSDetailView: View {
             groups: StreamRanking.rankedGroups(displayGroups(core.streamGroups())),
             progress: core.streamLoadProgress(),
             states: core.streamAddonStates(),
+            settleTimedOut: settleTimedOut,
             play: { stream, url in Task { await playLiveStream(stream, url: url) } }
         )
         .padding(.horizontal, Theme.Space.md)
@@ -744,6 +759,7 @@ struct iOSDetailView: View {
                 episodeRowLabel(v, isWatched: isWatched, progress: progress)
             }
             .buttonStyle(RowFocusStyle())
+            .accessibilityValue(isWatched ? "Watched" : "")
             .contextMenu {
                 Button(isWatched ? "Mark as Unwatched" : "Mark as Watched") {
                     core.markVideoWatched(v, !isWatched)
@@ -762,6 +778,7 @@ struct iOSDetailView: View {
                     if isWatched {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.footnote).foregroundStyle(Theme.Palette.accent)
+                            .accessibilityHidden(true)
                     }
                     Text("\(v.episodeNumber). \(v.episodeTitle)")
                         .font(Theme.Typography.cardTitle)
@@ -799,6 +816,7 @@ struct iOSDetailView: View {
             if isWatched {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.callout).foregroundStyle(Theme.Palette.accent).padding(5).shadow(radius: 3)
+                    .accessibilityHidden(true)
             }
         }
         .overlay(alignment: .bottom) {
@@ -823,7 +841,10 @@ struct iOSDetailView: View {
     /// player against a torrent the server had never been told to create, so the stream never played.
     private func primePlayback(_ stream: CoreStream) {
         core.loadEnginePlayer(for: stream)
-        prepareTorrentStream(stream)
+        // Cancel any prior torrent prime before storing the new one, so a re-pick can't leave a stale
+        // backoff loop running; the stored Task is also cancelled on view disappear.
+        torrentPrime?.cancel()
+        torrentPrime = prepareTorrentStream(stream)
     }
 
     /// Engine-history profiles resume from the engine; everyone else from the account/overlay.
@@ -859,6 +880,7 @@ struct iOSEpisodeStreams: View {
     @State private var player: iOSDetailView.PlayerLaunch?
     @State private var preparing = false
     @State private var settleTimedOut = false      // resolution gave up → show "No sources found", not a spinner
+    @State private var torrentPrime: Task<Void, Never>?  // outstanding torrent /create retry loop, cancelled on disappear / new pick
 
     private var backdropHeight: CGFloat {
         #if os(macOS)
@@ -888,8 +910,14 @@ struct iOSEpisodeStreams: View {
         .background(Theme.Palette.canvas.ignoresSafeArea())
         .navigationTitle(video.episodeTitle)
         .inlineNavigationTitle()
-        // The engine loads per-episode streams on demand; trigger that load for THIS episode.
-        .onAppear { core.loadMeta(type: "series", id: meta.id, streamType: "series", streamId: video.id) }
+        // The engine loads per-episode streams on demand; trigger that load for THIS episode — but only
+        // when the resident streams aren't already this episode's, so a back/forward revisit doesn't churn.
+        .onAppear {
+            if core.metaDetails?.meta?.id != meta.id {
+                core.loadMeta(type: "series", id: meta.id, streamType: "series", streamId: video.id)
+            }
+        }
+        .onDisappear { torrentPrime?.cancel() }
         .task {
             try? await Task.sleep(for: .seconds(12))
             settleTimedOut = true
@@ -898,8 +926,8 @@ struct iOSEpisodeStreams: View {
             PlayerScreen(
                 url: launch.url, title: launch.title, headers: launch.headers, resumeSeconds: launch.resume,
                 recordMeta: launch.meta, recordQualityText: launch.qualityText, recordIsTorrent: launch.isTorrent,
-                onProgress: { pos, dur in Task { await account.saveProgress(for: launch.meta, positionSeconds: pos, durationSeconds: dur) } },
-                onSeek: { pos, dur in Task { await account.saveProgress(for: launch.meta, positionSeconds: pos, durationSeconds: dur) } },
+                onProgress: { pos, dur in Task { [weak account] in await account?.saveProgress(for: launch.meta, positionSeconds: pos, durationSeconds: dur) } },
+                onSeek: { pos, dur in Task { [weak account] in await account?.saveProgress(for: launch.meta, positionSeconds: pos, durationSeconds: dur) } },
                 onClose: { player = nil }
             )
             .ignoresSafeArea()
@@ -990,7 +1018,10 @@ struct iOSEpisodeStreams: View {
         guard !preparing else { return }
         preparing = true; defer { preparing = false }
         core.loadEnginePlayer(for: stream)
-        prepareTorrentStream(stream)
+        // Cancel any prior torrent prime before storing the new one, so a re-pick can't leave a stale
+        // backoff loop running; the stored Task is also cancelled on view disappear.
+        torrentPrime?.cancel()
+        torrentPrime = prepareTorrentStream(stream)
         let name = "\(meta.name)  ·  S\(video.season ?? season)E\(video.episodeNumber)"
         let pm = PlaybackMeta(libraryId: meta.id, videoId: video.id, type: "series",
                               name: meta.name, poster: video.thumbnail ?? meta.poster,
@@ -1258,6 +1289,10 @@ struct iOSSourceList: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("\(group.addon) sources")
+        .accessibilityHint(isCollapsed ? "Double-tap to expand" : "Double-tap to collapse")
+        .accessibilityValue(isCollapsed ? "Collapsed" : "Expanded")
+        .accessibilityAddTraits(.isHeader)
     }
 
     @ViewBuilder private func streamRow(_ addon: String, _ stream: CoreStream) -> some View {

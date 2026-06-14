@@ -20,7 +20,7 @@ enum Theme {
         static var hairline: Color { ThemeManager.shared.hairline } // dividers only
         static let textPrimary   = rgb(0.965, 0.945, 0.914) // #F6F1E9
         static let textSecondary = rgb(0.737, 0.694, 0.631) // #BCB1A1
-        static let textTertiary  = rgb(0.549, 0.510, 0.451) // #8C8273
+        static let textTertiary  = rgb(0.620, 0.580, 0.520) // #9E9485 — raised from #8C8273 so 10-11pt text clears 4.5:1 on the warm canvas across all 8 accents
         // Accent is user-themeable via ThemeManager (8 curated accents). accentSoft / onAccent follow it.
         static var accent: Color { ThemeManager.shared.accent }             // focus / selection / primary / progress
         static var accentBright: Color { ThemeManager.shared.accentBright } // focus glow highlight
@@ -133,20 +133,35 @@ private struct CardFocusContent: View {
     @Environment(\.isFocused) private var focused
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var theme: ThemeManager   // observe so a theme change repaints this style
+    #if os(macOS)
+    @State private var isHovered = false   // Mac has no focus engine for cards; pointer hover drives the same lift
+    #endif
     var body: some View {
-        let lifted = focused && !reduceMotion
-        configuration.label
+        // On Mac, treat pointer hover as the focus signal so cards light up under the cursor;
+        // iOS/tvOS keep using the focus engine (`focused`) untouched.
+        #if os(macOS)
+        let active = focused || isHovered
+        #else
+        let active = focused
+        #endif
+        let lifted = active && !reduceMotion
+        let label = configuration.label
             .scaleEffect(lifted ? scale : (configuration.isPressed ? 0.97 : 1))
             // Theme-colored halo on focus: an even accent glow that reads, at a glance and from
             // across the room, which card the focus is on. Sized to sit inside the rails' padding
             // so it never clips at a row edge.
-            .shadow(color: Theme.Palette.accent.opacity(focused ? 0.75 : 0),
-                    radius: focused ? 18 : 0, x: 0, y: 0)
+            .shadow(color: Theme.Palette.accent.opacity(active ? 0.75 : 0),
+                    radius: active ? 18 : 0, x: 0, y: 0)
             // A soft black depth underneath grounds the lifted card on any artwork or theme.
-            .shadow(color: .black.opacity(focused ? 0.45 : 0.32),
-                    radius: focused ? 16 : 12, x: 0, y: focused ? 10 : 7)
-            .animation(reduceMotion ? nil : Theme.Motion.focus, value: focused)
+            .shadow(color: .black.opacity(active ? 0.45 : 0.32),
+                    radius: active ? 16 : 12, x: 0, y: active ? 10 : 7)
+            .animation(reduceMotion ? nil : Theme.Motion.focus, value: active)
             .animation(Theme.Motion.state, value: configuration.isPressed)
+        #if os(macOS)
+        return label.onHover { isHovered = $0 }
+        #else
+        return label
+        #endif
     }
 }
 
@@ -162,17 +177,31 @@ private struct PrimaryActionContent: View {
     @Environment(\.isFocused) private var focused
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var theme: ThemeManager   // observe so a theme change repaints this style
+    #if os(macOS)
+    @State private var isHovered = false   // Mac drives the same brighten/scale/glow from pointer hover
+    #endif
     var body: some View {
-        configuration.label
+        // On Mac, pointer hover stands in for the focus engine; iOS/tvOS keep using `focused`.
+        #if os(macOS)
+        let active = focused || isHovered
+        #else
+        let active = focused
+        #endif
+        let label = configuration.label
             .font(Theme.Typography.label)
             .foregroundStyle(Theme.Palette.onAccent)
             .padding(.horizontal, Theme.Space.lg)
             .padding(.vertical, Theme.Space.md)
-            .background(focused ? Theme.Palette.accentBright : Theme.Palette.accent,
+            .background(active ? Theme.Palette.accentBright : Theme.Palette.accent,
                         in: RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
-            .scaleEffect(focused && !reduceMotion ? 1.06 : (configuration.isPressed ? 0.97 : 1))
-            .shadow(color: Theme.Palette.accent.opacity(focused ? 0.55 : 0), radius: 26, y: 12)
-            .animation(reduceMotion ? nil : Theme.Motion.focus, value: focused)
+            .scaleEffect(active && !reduceMotion ? 1.06 : (configuration.isPressed ? 0.97 : 1))
+            .shadow(color: Theme.Palette.accent.opacity(active ? 0.55 : 0), radius: 26, y: 12)
+            .animation(reduceMotion ? nil : Theme.Motion.focus, value: active)
+        #if os(macOS)
+        return label.onHover { isHovered = $0 }
+        #else
+        return label
+        #endif
     }
 }
 
@@ -190,16 +219,30 @@ private struct RowFocusContent: View {
     @Environment(\.isFocused) private var focused
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var theme: ThemeManager   // observe so a theme change repaints this style
+    #if os(macOS)
+    @State private var isHovered = false   // Mac drives the same fill/ring/lift from pointer hover
+    #endif
     var body: some View {
-        configuration.label
-            .background(focused ? Theme.Palette.surface2 : Theme.Palette.surface1,
+        // On Mac, pointer hover stands in for the focus engine; iOS/tvOS keep using `focused`.
+        #if os(macOS)
+        let active = focused || isHovered
+        #else
+        let active = focused
+        #endif
+        let label = configuration.label
+            .background(active ? Theme.Palette.surface2 : Theme.Palette.surface1,
                         in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                    .strokeBorder(Theme.Palette.accent, lineWidth: focused ? 3 : 0)
+                    .strokeBorder(Theme.Palette.accent, lineWidth: active ? 3 : 0)
             )
-            .scaleEffect(focused && !reduceMotion ? 1.015 : (configuration.isPressed ? 0.99 : 1))
-            .shadow(color: focused ? Theme.Palette.accent.opacity(0.28) : .clear, radius: 22, y: 10)
-            .animation(reduceMotion ? nil : Theme.Motion.focus, value: focused)
+            .scaleEffect(active && !reduceMotion ? 1.015 : (configuration.isPressed ? 0.99 : 1))
+            .shadow(color: active ? Theme.Palette.accent.opacity(0.28) : .clear, radius: 22, y: 10)
+            .animation(reduceMotion ? nil : Theme.Motion.focus, value: active)
+        #if os(macOS)
+        return label.onHover { isHovered = $0 }
+        #else
+        return label
+        #endif
     }
 }

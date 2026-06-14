@@ -34,6 +34,20 @@ struct iOSRootView: View {
             case .settings: return "gearshape.fill"
             }
         }
+
+        /// The unfilled twin of `icon`, shown when the tab is inactive so the active tab reads as
+        /// filled-and-tinted against outline neighbours (#22). Symbols without a fill variant (Live's
+        /// waves, Search's glass) keep their single glyph.
+        var inactiveIcon: String {
+            switch self {
+            case .home: return "house"
+            case .discover: return "safari"
+            case .library: return "books.vertical"
+            case .addons: return "puzzlepiece.extension"
+            case .settings: return "gearshape"
+            case .live, .search: return icon
+            }
+        }
     }
 
     @State private var tab: Tab = .home
@@ -73,6 +87,8 @@ struct iOSRootView: View {
                 tabButton(item)
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Tabs")
         .padding(.top, Theme.Space.xs)
         .background(alignment: .top) {
             VStack(spacing: 0) {
@@ -91,11 +107,20 @@ struct iOSRootView: View {
             tab = item
         } label: {
             VStack(spacing: 3) {
-                Image(systemName: item.icon)
+                // Active tab: filled glyph in an accent-soft capsule so the selection reads at a
+                // glance; inactive tabs are an outline glyph with no pill (#22).
+                Image(systemName: selected ? item.icon : item.inactiveIcon)
                     .font(.system(size: 20, weight: .semibold))
                     .frame(height: 22)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 2)
+                    .background {
+                        if selected {
+                            Capsule().fill(Theme.Palette.accent.opacity(0.18))
+                        }
+                    }
                 Text(item.title)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(.system(size: 11, weight: selected ? .semibold : .medium))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
@@ -106,6 +131,7 @@ struct iOSRootView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(item.title)
+        .accessibilityHint("Switches to \(item.title) tab")
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 }
@@ -252,18 +278,20 @@ struct iOSHomeView: View {
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: Theme.Space.md) {
-            Image(systemName: account.isSignedIn ? "popcorn" : "person.crop.circle")
-                .font(.system(size: 52)).foregroundStyle(Theme.Palette.textSecondary)
-            Text(account.isSignedIn ? "Loading your catalogs…" : "Sign in to load your add-ons and library.")
-                .font(Theme.Typography.body).foregroundStyle(Theme.Palette.textSecondary)
-                .multilineTextAlignment(.center)
-            if !account.isSignedIn {
-                Button("Sign In") { showSignIn = true }.buttonStyle(.borderedProminent)
-            }
+    @ViewBuilder private var emptyState: some View {
+        // Route through the shared compat empty state for one consistent layout (#44). Signed-out gets
+        // a primary Sign In CTA (the in-house PrimaryActionStyle, not the stock .borderedProminent — #42);
+        // signed-in is the bare loading line while catalogs hydrate.
+        if account.isSignedIn {
+            ContentUnavailableViewCompat(title: "Loading your catalogs…", systemImage: "popcorn",
+                message: "Your add-ons' rows fill in as the engine hydrates.")
+                .frame(minHeight: 420)
+        } else {
+            ContentUnavailableViewCompat(title: "Sign in to get started", systemImage: "person.crop.circle",
+                message: "Sign in to load your add-ons and library.",
+                cta: (title: "Sign In", action: { showSignIn = true }))
+                .frame(minHeight: 420)
         }
-        .frame(maxWidth: .infinity).padding(.top, 80).padding(.horizontal, Theme.Space.xl)
     }
 }
 
@@ -347,10 +375,15 @@ struct iOSLibraryView: View {
     /// engine's own `request` and dispatches it back via `core.selectLibrary` on tap. The library
     /// re-emits and the grid + hero refresh on their own.
     @ViewBuilder private func filterChips(_ selectable: CoreLibrarySelectable) -> some View {
+        // Route through the shared ChipButtonStyle (like Search's link button): a selected chip is a
+        // soft-accent pill with accent ink, so on-chip text follows onAccent and stays legible on
+        // light accents (#39) — the old solid-accent + hardcoded-white chip went invisible.
         chipScroll { ForEach(selectable.types) { t in
-            chip(t.label, t.selected) { core.selectLibrary(t.request) } } }
+            Button(t.label) { core.selectLibrary(t.request) }
+                .buttonStyle(ChipButtonStyle(selected: t.selected)) } }
         chipScroll { ForEach(selectable.sorts) { s in
-            chip(s.label, s.selected) { core.selectLibrary(s.request) } } }
+            Button(s.label) { core.selectLibrary(s.request) }
+                .buttonStyle(ChipButtonStyle(selected: s.selected)) } }
     }
 
     private func chipScroll<C: View>(@ViewBuilder _ content: () -> C) -> some View {
@@ -358,16 +391,6 @@ struct iOSLibraryView: View {
             HStack(spacing: Theme.Space.sm) { content() }
                 .padding(.horizontal, Theme.Space.md).padding(.vertical, Theme.Space.xs)
         }
-    }
-
-    private func chip(_ label: String, _ selected: Bool, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label).lineLimit(1).font(Theme.Typography.label)
-                .padding(.horizontal, Theme.Space.md).padding(.vertical, 8)
-                .background(selected ? Theme.Palette.accent : Theme.Palette.surface2, in: Capsule())
-                .foregroundStyle(selected ? .white : Theme.Palette.textSecondary)
-        }
-        .buttonStyle(.plain)
     }
 }
 
@@ -555,13 +578,16 @@ struct iOSDiscoverView: View {
                         // of the row above it (#7).
                         VStack(alignment: .leading, spacing: Theme.Space.xs) {
                             chipScroll { ForEach(discover.selectable.types) { t in
-                                chip(t.type.capitalized, t.selected) { core.selectDiscover(t.request) } } }
+                                Button(t.type.capitalized) { core.selectDiscover(t.request) }
+                                    .buttonStyle(ChipButtonStyle(selected: t.selected)) } }
                             chipScroll { ForEach(discover.selectable.catalogs) { c in
-                                chip(c.catalog, c.selected) { core.selectDiscover(c.request) } } }
+                                Button(c.catalog) { core.selectDiscover(c.request) }
+                                    .buttonStyle(ChipButtonStyle(selected: c.selected)) } }
                             if let genre = discover.selectable.extra.first(where: { $0.name.caseInsensitiveCompare("genre") == .orderedSame }),
                                !genre.options.isEmpty {
                                 chipScroll { ForEach(genre.options) { o in
-                                    chip(o.label, o.selected) { core.selectDiscover(o.request) } } }
+                                    Button(o.label) { core.selectDiscover(o.request) }
+                                        .buttonStyle(ChipButtonStyle(selected: o.selected)) } }
                             }
                         }
                         PosterGrid(items: discover.items.map {
@@ -613,16 +639,6 @@ struct iOSDiscoverView: View {
             HStack(spacing: Theme.Space.sm) { content() }
                 .padding(.horizontal, Theme.Space.md).padding(.vertical, Theme.Space.xs)
         }
-    }
-
-    private func chip(_ label: String, _ selected: Bool, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label).lineLimit(1).font(Theme.Typography.label)
-                .padding(.horizontal, Theme.Space.md).padding(.vertical, 8)
-                .background(selected ? Theme.Palette.accent : Theme.Palette.surface2, in: Capsule())
-                .foregroundStyle(selected ? .white : Theme.Palette.textSecondary)
-        }
-        .buttonStyle(.plain)
     }
 }
 
@@ -690,11 +706,11 @@ extension View {
                 recordMeta: item.meta, recordQualityText: item.qualityText, recordIsTorrent: item.isTorrent,
                 onProgress: { pos, dur in
                     guard let meta = item.meta else { return }
-                    Task { await account.saveProgress(for: meta, positionSeconds: pos, durationSeconds: dur) }
+                    Task { [weak account] in await account?.saveProgress(for: meta, positionSeconds: pos, durationSeconds: dur) }
                 },
                 onSeek: { pos, dur in
                     guard let meta = item.meta else { return }
-                    Task { await account.saveProgress(for: meta, positionSeconds: pos, durationSeconds: dur) }
+                    Task { [weak account] in await account?.saveProgress(for: meta, positionSeconds: pos, durationSeconds: dur) }
                 },
                 onClose: { launch.wrappedValue = nil }
             )
@@ -1150,17 +1166,26 @@ extension View {
     }
 }
 
-/// Cross-version empty state (ContentUnavailableView is iOS 17+; the deployment target is 16).
-private struct ContentUnavailableViewCompat: View {
+/// Cross-version empty state (ContentUnavailableView is iOS 17+; the deployment target is 16). An
+/// optional `cta` adds a primary action button below the message so empty states across the browse
+/// screens share one layout + button treatment (#44).
+struct ContentUnavailableViewCompat: View {
     let title: String; let systemImage: String; let message: String
+    /// Optional call to action: the button title plus its tap handler. nil = no button (the default).
+    var cta: (title: String, action: () -> Void)? = nil
     @EnvironmentObject private var theme: ThemeManager   // observe textScale so Theme.Typography repaints live
     var body: some View {
         VStack(spacing: Theme.Space.md) {
             Image(systemName: systemImage).font(.system(size: 48)).foregroundStyle(Theme.Palette.textTertiary)
             Text(title).font(Theme.Typography.sectionTitle).foregroundStyle(Theme.Palette.textPrimary)
             Text(message).font(Theme.Typography.body).foregroundStyle(Theme.Palette.textSecondary)
+                .multilineTextAlignment(.center)
+            if let cta {
+                Button(cta.title, action: cta.action).buttonStyle(PrimaryActionStyle())
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, Theme.Space.xl)
         .background(Theme.Palette.canvas.ignoresSafeArea())
     }
 }

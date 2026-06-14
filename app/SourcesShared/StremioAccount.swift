@@ -257,7 +257,10 @@ final class StremioAccount: ObservableObject {
                 .map { StreamSource(base: $0.baseUrl, name: $0.manifest.name) }
             log.info("loaded \(self.addons.count) addons, \(self.streamSources.count) stream addons")
             if email == nil { await backfillEmail() }   // older sessions saved no email
-        } catch { /* keep whatever we had */ }
+        } catch {
+            // keep whatever we had, but surface why the refresh failed
+            log.error("loadAddons failed: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     /// Backfill the account email (for sessions that predate email capture).
@@ -324,7 +327,17 @@ final class StremioAccount: ObservableObject {
 
     private func datastorePut(authKey: String, change: [String: Any]) async {
         let body: [String: Any] = ["authKey": authKey, "collection": "libraryItem", "changes": [change]]
-        _ = try? await postRaw("datastorePut", body: body)
+        do {
+            _ = try await postRaw("datastorePut", body: body)
+        } catch {
+            // Progress saves are best-effort, but don't drop the failure silently: log it and retry once.
+            log.error("datastorePut failed: \(error.localizedDescription, privacy: .public); retrying once")
+            do {
+                _ = try await postRaw("datastorePut", body: body)
+            } catch {
+                log.error("datastorePut retry failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
 
     /// Like `post`, but with an untyped JSON body/response, for library items whose full shape we
