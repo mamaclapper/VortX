@@ -74,7 +74,19 @@ struct FeaturedHeroView: View {
                 posterFallback
                 AsyncImage(url: URL(string: model.hero?.backdrop ?? "")) { phase in
                     switch phase {
-                    case .success(let img): img.resizable().aspectRatio(contentMode: .fill)
+                    case .success(let img):
+                        ZStack {
+                            // Ambient fill: a blurred, band-filling copy so the wide Mac hero has no empty
+                            // side gaps — WITHOUT cropping the real still.
+                            img.resizable().aspectRatio(contentMode: .fill)
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .clipped()
+                                .blur(radius: 40)
+                                .opacity(0.55)
+                            // The still shown WHOLE (fit) so the wide-short band can't zoom a 16:9 backdrop
+                            // down to a sliver (the "only the top of the throne" report). Fit, not fill.
+                            img.resizable().aspectRatio(contentMode: .fit)
+                        }
                     default: Color.clear   // transparent while loading / on failure so the poster shows through
                     }
                 }
