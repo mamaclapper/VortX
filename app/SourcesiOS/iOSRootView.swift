@@ -815,8 +815,12 @@ private func iOSDirectResume(for item: RailItem, core: CoreBridge,
     var episodes: [PlayerEpisodeRef] = []
     var loadEpisode: ((String) async -> PlayerEpisodeStream?)? = nil
     if entry.type == "series" {
-        if core.metaDetails?.meta?.id != item.id || (core.metaDetails?.meta?.videos?.isEmpty ?? true) {
-            core.loadMeta(type: "series", id: item.id)
+        // Load the series meta (for the episode list) AND the CURRENT episode's streams, so the in-player
+        // Sources button has this episode's alternates. Loading meta-only here had wiped the resident
+        // episode streams the Sources list relied on — the "Sources button gone from CW resume" regression.
+        let hasEpStreams = core.metaDetails?.streams.contains { $0.request.path.id == entry.videoId } ?? false
+        if core.metaDetails?.meta?.id != item.id || (core.metaDetails?.meta?.videos?.isEmpty ?? true) || !hasEpStreams {
+            core.loadMeta(type: "series", id: item.id, streamType: "series", streamId: entry.videoId)
             for _ in 0 ..< 6 {
                 if core.metaDetails?.meta?.id == item.id, !(core.metaDetails?.meta?.videos?.isEmpty ?? true) { break }
                 try? await Task.sleep(for: .milliseconds(250))
