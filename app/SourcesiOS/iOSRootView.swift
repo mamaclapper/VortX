@@ -228,6 +228,13 @@ struct iOSHomeView: View {
                 }
                 .padding(.bottom, Theme.Space.md)
             }
+            #if os(iOS)
+            // #4: let the hero billboard bleed UP under the frosted nav bar (the immersive top), instead
+            // of starting below an opaque strip. The bar's ultraThinMaterial then frosts over the artwork
+            // and content scrolls under it. The hero's own action row sits at the band's bottom, well
+            // clear of the bar.
+            .ignoresSafeArea(.container, edges: .top)
+            #endif
             // A scroll gesture quiets the ambient hero rotation (resumes after inactivity) — the
             // billboard never yanks the page while the user is browsing (#53).
             .scrollDismissesHeroRotation(model: hero)
@@ -362,6 +369,9 @@ struct iOSLibraryView: View {
                         .frame(minHeight: 420)
                 }
             }
+            #if os(iOS)
+            .ignoresSafeArea(.container, edges: .top)   // #4: hero bleeds up under the frosted bar (matches Home)
+            #endif
             .scrollDismissesHeroRotation(model: hero)
             .background(Theme.Palette.canvas.ignoresSafeArea())
             .stremioWordmarkTitle("Library", isActive: isActive)
@@ -647,6 +657,9 @@ struct iOSDiscoverView: View {
                 // clipping report. Home has only self-bounding horizontal rails, so it never needed this.
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            #if os(iOS)
+            .ignoresSafeArea(.container, edges: .top)   // #4: hero bleeds up under the frosted bar (matches Home)
+            #endif
             .scrollDismissesHeroRotation(model: hero)
             .background(Theme.Palette.canvas.ignoresSafeArea())
             .stremioWordmarkTitle("Discover", isActive: isActive)
