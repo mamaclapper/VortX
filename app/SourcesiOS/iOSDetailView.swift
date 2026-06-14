@@ -484,6 +484,7 @@ struct iOSDetailView: View {
         iOSSourceList(
             groups: StreamRanking.rankedGroups(displayGroups(core.streamGroups())),
             progress: core.streamLoadProgress(),
+            states: core.streamAddonStates(),
             continuity: rememberedQuality,
             play: { stream, url in Task { await playStream(stream, url: url) } }
         )
@@ -652,6 +653,7 @@ struct iOSDetailView: View {
         iOSSourceList(
             groups: StreamRanking.rankedGroups(displayGroups(core.streamGroups())),
             progress: core.streamLoadProgress(),
+            states: core.streamAddonStates(),
             play: { stream, url in Task { await playLiveStream(stream, url: url) } }
         )
         .padding(.horizontal, Theme.Space.md)
@@ -873,6 +875,7 @@ struct iOSEpisodeStreams: View {
                 iOSSourceList(
                     groups: StreamRanking.rankedGroups(displayGroups(core.streamGroups(forStreamId: video.id))),
                     progress: core.streamLoadProgress(forStreamId: video.id),
+                    states: core.streamAddonStates(forStreamId: video.id),
                     settleTimedOut: settleTimedOut,
                     continuity: rememberedQuality,
                     play: { stream, url in Task { await play(stream, url: url) } }
@@ -1073,6 +1076,9 @@ private struct iOSProgressStripe: View {
 struct iOSSourceList: View {
     let groups: [CoreStreamSourceGroup]
     let progress: (loaded: Int, total: Int)
+    /// Per-add-on resolution state, used ONLY to explain an empty result: an add-on that errored
+    /// (fetch/timeout/TLS) is surfaced distinctly from one that returned nothing. Empty by default.
+    var states: [CoreBridge.StreamAddonState] = []
     var settleTimedOut = false                          // resolution gave up → show "No sources" not a spinner
     var continuity: String? = nil                       // remembered quality signature → same-quality Watch-in pick
     let play: (CoreStream, URL) -> Void
@@ -1090,6 +1096,27 @@ struct iOSSourceList: View {
         groups.filter { sourceFilter == nil || $0.addon == sourceFilter }
     }
 
+    /// Empty result, told apart by CAUSE. If one or more add-ons actually ERRORED (fetch / timeout /
+    /// TLS), name them and show the reason instead of the misleading generic "returned nothing" — this
+    /// is what surfaces, on-device, WHY a title finds no links (e.g. an iOS-only stream-fetch failure).
+    @ViewBuilder private var emptyState: some View {
+        let errored = states.filter { $0.error != nil }
+        if errored.isEmpty {
+            iOSEmptyRow(text: "None of your add-ons returned a playable source for this title.")
+        } else {
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                iOSEmptyRow(text: "\(errored.count) add-on\(errored.count == 1 ? "" : "s") couldn't be reached for this title:")
+                ForEach(errored) { s in
+                    Text("\(s.name): \(s.error ?? "error")")
+                        .font(Theme.Typography.label)
+                        .foregroundStyle(Theme.Palette.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, Theme.Space.md)
+                }
+            }
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.md) {
             iOSRailHeader(eyebrow: eyebrow, title: "Sources")
@@ -1100,7 +1127,7 @@ struct iOSSourceList: View {
                                   ? "Finding sources…  \(progress.loaded)/\(progress.total)"
                                   : "Finding sources…")
                 } else {
-                    iOSEmptyRow(text: "None of your add-ons returned a playable source for this title.")
+                    emptyState
                 }
             } else {
                 controlBar

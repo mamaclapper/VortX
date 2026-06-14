@@ -381,6 +381,66 @@ final class CoreBridge: ObservableObject {
         return (loaded, total)
     }
 
+    /// Per-add-on stream-resolution state for the loaded title, read from the RAW engine JSON so it
+    /// can expose what `streamGroups()` (ready-only) silently drops: an add-on whose stream request
+    /// ERRORED (a fetch failure, timeout, TLS/ATS block, or bad response) otherwise looks identical
+    /// to one that simply returned an empty list, so a "no sources" page can never say WHY. This is
+    /// the difference that explains "tvOS Lite finds links but iOS doesn't": if iOS gets `Err(Fetch …)`
+    /// where Lite gets `Ready`, the network/transport is the culprit, not the add-on set. `EmptyContent`
+    /// is reported as a non-error empty (the add-on genuinely had nothing for this title).
+    struct StreamAddonState: Identifiable {
+        let base: String
+        let name: String
+        let ready: Int          // streams returned
+        let loading: Bool       // still in flight
+        let error: String?      // non-nil → the add-on's stream request FAILED (not just empty)
+        var id: String { base }
+    }
+
+    func streamAddonStates(forStreamId streamId: String? = nil) -> [StreamAddonState] {
+        guard let data = stateData("meta_details"),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let streams = object["streams"] as? [[String: Any]] else { return [] }
+        let names = addonNamesByBase()
+        var out: [StreamAddonState] = []
+        for group in streams {
+            let request = group["request"] as? [String: Any]
+            if let streamId,
+               let path = request?["path"] as? [String: Any],
+               path["id"] as? String != streamId { continue }
+            let base = request?["base"] as? String ?? ""
+            let name = names[base] ?? "Add-on"
+            let content = group["content"] as? [String: Any]
+            switch content?["type"] as? String {
+            case "Ready":
+                let n = (content?["content"] as? [[String: Any]])?.count ?? 0
+                out.append(.init(base: base, name: name, ready: n, loading: false, error: nil))
+            case "Err":
+                let msg = Self.describeResourceError(content?["content"])
+                out.append(.init(base: base, name: name, ready: 0, loading: false, error: msg))
+            default:
+                out.append(.init(base: base, name: name, ready: 0, loading: true, error: nil))
+            }
+        }
+        return out
+    }
+
+    /// Flatten stremio-core's `ResourceError` / `EnvError` JSON into a short human string. Returns nil
+    /// for `EmptyContent` (the add-on returned an empty list — not an error). Tagged-enum shapes:
+    /// `{"type":"Fetch","content":"…"}`, `{"type":"Env","content":{"type":"Fetch","content":"…"}}`, or a bare string.
+    private static func describeResourceError(_ content: Any?) -> String? {
+        if let s = content as? String { return s }
+        guard let d = content as? [String: Any] else { return "error" }
+        let type = d["type"] as? String
+        if type == "EmptyContent" { return nil }   // not an error: the add-on simply had nothing
+        if let innerStr = d["content"] as? String { return [type, innerStr].compactMap { $0 }.joined(separator: ": ") }
+        if let innerDict = d["content"] as? [String: Any] {
+            let parts = [type, innerDict["type"] as? String, innerDict["content"] as? String]
+            return parts.compactMap { $0 }.joined(separator: ": ")
+        }
+        return type ?? "error"
+    }
+
     /// Cache of the addon transportUrl -> name map. Decoding the whole `ctx` JSON to build
     /// it ran on EVERY streamGroups() call, which the DetailView and player source panel hit
     /// per render. Built once, reused, and invalidated on the main actor whenever `ctx`
