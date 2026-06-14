@@ -68,12 +68,19 @@ enum NodeServer {
         // all share the libuv threadpool (default 4). Many dead trackers resolving slowly
         // can saturate it and stall the engine. 16 threads relieves that contention. Cheap
         // and harmless; the heartbeat in the preload tells us if the loop still freezes.
-        // NOTE: we deliberately do NOT set NO_HTTPS_SERVER or HLS_V2_DISABLED. They were tried as a fix
-        // for the "server dies" reports, but that was the wrong cause: the death was an unhandled
-        // EADDRINUSE error event on our own 11471 proxy (now fixed in the preload), not the server's
-        // :12470 HTTPS endpoint or its HLS transcoder, which Stremio runs fine. Leave the server in the
-        // configuration Stremio itself runs; CASTING_DISABLED above is the only flag we set, and that one
-        // is a genuine fix for the SSDP/casting error flood in the embedded runtime.
+        // CRITICAL (regression fix, #56): the in-process nodejs-mobile runtime CANNOT spawn child
+        // processes in the iOS/tvOS sandbox, so the server's :12470 HTTPS endpoint and its HLSv2
+        // transcoder (which shells out to ffmpeg via child_process.spawn) MUST be disabled — exactly
+        // what official Stremio's own mobile build does (server.js force-sets both under IOS_APP).
+        // Without them the boot-time hwAccel profiler fires a /hlsv2 probe that spawns ffmpeg, the spawn
+        // is denied, and the node runtime dies ~10s after launch (the "server goes Offline" report).
+        // A prior commit removed these on the mistaken theory that the death was only the 11471
+        // web-proxy's EADDRINUSE — but that proxy is gated to the web-host target and never runs here,
+        // so removing them just re-exposed the native apps to the iOS-incompatible HTTPS/HLS/spawn paths.
+        // Do NOT set IOS_APP itself: server.js would then call a native apple_bridge binding that isn't
+        // linked in this app and would throw. These two discrete flags are the correct substitute.
+        setenv("NO_HTTPS_SERVER", "1", 1)
+        setenv("HLS_V2_DISABLED", "1", 1)
         #if STREMIOX_WEB_HOST
         // Only the WKWebView web-host target needs the 11471 reverse-proxy of web.stremio.com (so the
         // webview can load the UI from a loopback origin). The native iOS/tvOS apps have no webview, so
