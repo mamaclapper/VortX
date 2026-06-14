@@ -41,17 +41,18 @@ struct PlayerScreen: View {
     var recordMeta: PlaybackMeta? = nil
     var recordQualityText: String? = nil                    // StreamRanking.signature(stream) of the launching stream
     var recordIsTorrent: Bool = false                       // stream rides the embedded torrent engine
-    var onProgress: (Double, Double) -> Void = { _, _ in }   // periodic forward progress (TimeChanged)
-    var onSeek: (Double, Double) -> Void = { _, _ in }       // exact position on user-seek (Seek)
-    var onNext: () -> Void = {}                             // advance to the next episode (legacy, non-episode callers)
     // In-player episode navigation (series only). The ordered season episodes + a closure resolving any
     // episode id to a ready-to-play stream let the player advance Next / Prev and at end-of-episode IN
     // PLACE (a smooth source hot-swap, no cover teardown). Empty for movies / ad-hoc plays. The caller
-    // (iOSEpisodeStreams) owns the resolve, so ranking / direct-links / torrent-prime / resume stay in
-    // one place. When `episodes` is non-empty the player derives Next/Prev from the CURRENT episode and
-    // ignores the legacy `hasNext`/`onNext`.
+    // (iOSEpisodeStreams) owns the resolve, so ranking / direct-links / torrent-prime / resume stay in one
+    // place. Declared here (right after the record-* inputs) so the call-site argument order is valid.
+    // When `episodes` is non-empty the player derives Next/Prev from the CURRENT episode, ignoring the
+    // legacy `hasNext` / `onNext`.
     var episodes: [PlayerEpisodeRef] = []
     var loadEpisode: ((String) async -> PlayerEpisodeStream?)? = nil
+    var onProgress: (Double, Double) -> Void = { _, _ in }   // periodic forward progress (TimeChanged)
+    var onSeek: (Double, Double) -> Void = { _, _ in }       // exact position on user-seek (Seek)
+    var onNext: () -> Void = {}                             // advance to the next episode (legacy, non-episode callers)
     let onClose: () -> Void
 
     // CoreBridge / account are injected at the iOS app root; the player reads them for in-player source

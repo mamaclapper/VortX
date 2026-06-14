@@ -839,7 +839,7 @@ struct iOSDetailView: View {
         if let m = meta {
             NavigationLink {
                 iOSEpisodeStreams(meta: m, video: v, season: v.season ?? season,
-                                  seasonEpisodes: episodes(videos))
+                                  seasonEpisodes: episodesInSeason(v.season ?? season))
             } label: {
                 episodeRowLabel(v, isWatched: isWatched, progress: progress)
             }
