@@ -95,6 +95,10 @@ struct DiscoverView: View {
                     PosterCard(title: item.name, poster: item.poster, type: item.type, id: item.id,
                                menu: .catalog,
                                onFocus: { focusModel.focus(item.focusedHero) })
+                        // Infinite scroll: load the next catalog page when focus reaches the last card
+                        // (same shared engine path the touch grid uses). Fixes "next catalog not
+                        // loading" on Apple TV too, not just iOS/Mac.
+                        .onAppear { if item.id == items.last?.id { core.loadDiscoverNextPage() } }
                 }
             }
             .padding(.horizontal, Theme.Space.screenEdge)
