@@ -726,7 +726,20 @@ final class MPVMetalViewController: PlatformViewController {
     }
 
     /// Persisted video-size mode, read at startup so the first frame already uses it.
-    private(set) var videoSizeMode = UserDefaults.standard.string(forKey: "stremiox.videoSize") ?? "original"
+    private(set) var videoSizeMode = UserDefaults.standard.string(forKey: "stremiox.videoSize") ?? MPVMetalViewController.defaultVideoSizeMode
+
+    /// Default sizing per device. iPhone fills the screen (crop) so a 16:9 stream doesn't leave thick side
+    /// bars on a tall phone in landscape — the "thick bezels, fill it like this" report. iPad / Mac / Apple
+    /// TV keep "original" (whole frame, letterboxed): their larger screens make bars fine, and cropping a
+    /// 2.39:1 film on a TV would lose too much of the picture. The user can still change it in the player's
+    /// Aspect control, which persists the override.
+    private static var defaultVideoSizeMode: String {
+        #if os(iOS)
+        return UIDevice.current.userInterfaceIdiom == .phone ? "fill" : "original"
+        #else
+        return "original"
+        #endif
+    }
 
     /// Video sizing. "original" (default) = the whole frame at its correct aspect, with bars where
     /// the film is wider/narrower than the screen, exactly like actual Stremio. "zoom" crops to fill

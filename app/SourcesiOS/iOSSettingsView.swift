@@ -312,6 +312,19 @@ struct iOSSettingsView: View {
                     Label("Configure server", systemImage: "server.rack")
                 }
 
+                #if !os(macOS)
+                // The embedded server tees its console + uncaught errors + a per-second heartbeat to a log
+                // file. Surfacing it lets a user whose server dies on-device read/share the exact cause
+                // (the sim can't reproduce it). iOS/iPad only: this is the in-process NodeServer.
+                if !StremioServer.isCustom {
+                    NavigationLink {
+                        ServerLogView()
+                    } label: {
+                        Label("Server log", systemImage: "doc.text.magnifyingglass")
+                    }
+                }
+                #endif
+
                 #if os(macOS)
                 // macOS only: let this Mac act as a Stremio streaming server for the rest of the
                 // LAN (like the desktop app), so the Apple TV / phone can use it as their server.
@@ -571,3 +584,59 @@ struct iOSSettingsView: View {
         }
     }
 }
+
+#if !os(macOS)
+/// Read-only view of the embedded streaming server's status + recent log. The server tees its console
+/// output, uncaught exceptions, and a per-second heartbeat to a log file; surfacing it lets a user whose
+/// server dies on a real device (which the simulator does not reproduce) read and share the exact cause.
+private struct ServerLogView: View {
+    @State private var lines: [String] = []
+    @State private var status = ""
+    @State private var copied = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Space.md) {
+                Text(status)
+                    .font(Theme.Typography.body)
+                    .foregroundStyle(Theme.Palette.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if lines.isEmpty {
+                    Text("No log yet. If the server stopped, play a torrent title to start it, then return here.")
+                        .font(Theme.Typography.label)
+                        .foregroundStyle(Theme.Palette.textTertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text(lines.joined(separator: "\n"))
+                        .font(.system(.footnote, design: .monospaced))
+                        .foregroundStyle(Theme.Palette.textPrimary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(Theme.Space.md)
+        }
+        .background(Theme.Palette.canvas.ignoresSafeArea())
+        .navigationTitle("Server log")
+        .inlineNavigationTitle()
+        .toolbar {
+            HStack {
+                Button { reload() } label: { Image(systemName: "arrow.clockwise") }
+                Button {
+                    UIPasteboard.general.string = status + "\n\n" + lines.joined(separator: "\n")
+                    copied = true
+                } label: {
+                    Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc")
+                }
+            }
+        }
+        .onAppear(perform: reload)
+    }
+
+    private func reload() {
+        status = NodeServer.statusDescription
+        lines = NodeServer.logTail(80)
+        copied = false
+    }
+}
+#endif

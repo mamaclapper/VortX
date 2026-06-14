@@ -4,6 +4,22 @@ All notable changes to StremioX, newest first. StremioX is Apple TV first, with 
 
 What is planned next is in [ROADMAP.md](ROADMAP.md). To request a feature or report a bug, start a [GitHub Discussion](https://github.com/mamaclapper/StremioX/discussions) or [open an issue](https://github.com/mamaclapper/StremioX/issues).
 
+## 0.3.0 beta 15 (prerelease) - 2026-06-14
+
+More iPhone polish, all verified on an iOS build.
+
+### Added
+- **The launch animation now plays on iPhone, iPad, and Mac**, matching Apple TV, over the engine and streaming-server boot.
+- **Continue Watching long-press now offers "Details".** A Continue Watching card plays on tap, so the menu now also opens the detail page where you can pick a different episode or source, alongside "Remove from Continue Watching".
+- **A server log in Settings.** Settings > Streaming Server > Server log shows the embedded server's status and recent output (with copy), so when the server stops on a device you can see and share the exact reason.
+
+### Fixed
+- **The video fills the screen on iPhone.** A 16:9 stream left thick black bars on the sides in landscape; the iPhone player now fills the screen. iPad, Mac, and Apple TV keep the whole frame (letterboxed), and the player's Aspect control still switches between them.
+- **Hero buttons stopped squishing into vertical slivers.** After the iPhone width fix, the Trailer / In Library / Sources chips on a detail page could compress until their labels stacked vertically; they now keep their shape and wrap to a new line when space is tight.
+
+### Notes
+- Next: pinning down the streaming server stopping on some devices (the new server log will show why), in-player next/previous episode, an HTTP/HLS quality selector, and the rest of the 100+ item audit.
+
 ## 0.3.0 beta 14 (prerelease) - 2026-06-14
 
 The iPhone pass. Every fix below was reproduced and verified on an iOS build, not just the Mac.

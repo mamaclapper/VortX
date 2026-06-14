@@ -34,6 +34,39 @@ private func prepareTorrentStream(_ stream: CoreStream) -> Task<Void, Never>? {
     }
 }
 
+/// A left-to-right layout that wraps onto a new line when a row runs out of width. The hero action rows
+/// use it so a chip that doesn't fit the (now hard-width-capped) hero moves to the next line, instead of
+/// being compressed into a vertical sliver ("Tr / ail / er"). Each child is measured and placed at its
+/// natural size, so labels never wrap. iOS 16+ Layout protocol (the deployment target).
+struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+        let maxWidth = proposal.width ?? .greatestFiniteMagnitude
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0, widest: CGFloat = 0
+        for s in subviews {
+            let sz = s.sizeThatFits(.unspecified)
+            if x > 0, x + sz.width > maxWidth { x = 0; y += rowHeight + spacing; rowHeight = 0 }
+            x += sz.width + spacing
+            rowHeight = max(rowHeight, sz.height)
+            widest = max(widest, x - spacing)
+        }
+        return CGSize(width: min(widest, maxWidth), height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
+        let maxWidth = bounds.width
+        var x = bounds.minX, y = bounds.minY, rowHeight: CGFloat = 0
+        for s in subviews {
+            let sz = s.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + sz.width - bounds.minX > maxWidth { x = bounds.minX; y += rowHeight + spacing; rowHeight = 0 }
+            s.place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: ProposedViewSize(sz))
+            x += sz.width + spacing
+            rowHeight = max(rowHeight, sz.height)
+        }
+    }
+}
+
 /// Touch / Mac detail page. Loads meta through the shared engine, then presents the same cinematic
 /// composition the tvOS `DetailView` uses — a full-bleed backdrop from `meta.background` with a dark
 /// gradient scrim, the hero (logo or title, year · runtime · genres · rating, synopsis) over it, a
@@ -370,7 +403,10 @@ struct iOSDetailView: View {
         let primary = meta?.videos.flatMap { seriesPrimaryEpisode($0) }
         let primaryProgress = primary.map { episodeProgress($0.video) } ?? 0
         VStack(alignment: .leading, spacing: Theme.Space.xs) {
-            HStack(spacing: Theme.Space.sm) {
+            // FlowLayout, not HStack: the hero is hard-capped to the screen width, so an HStack squeezed
+            // the Trailer / In Library chips until their labels wrapped vertically ("Tr / ail / er").
+            // FlowLayout keeps each chip at its natural width and drops overflow onto the next line.
+            FlowLayout(spacing: Theme.Space.sm) {
                 if let m = meta, let primary {
                     VStack(alignment: .leading, spacing: Theme.Space.xs) {
                         NavigationLink {
@@ -389,7 +425,6 @@ struct iOSDetailView: View {
                 }
                 trailerButton
                 iOSLibraryChip()
-                Spacer(minLength: 0)
             }
         }
         .padding(.top, Theme.Space.xs)
@@ -470,34 +505,32 @@ struct iOSDetailView: View {
     @ViewBuilder private func watchNow(scrollToSources: @escaping () -> Void) -> some View {
         let groups = StreamRanking.rankedGroups(displayGroups(core.streamGroups()))
         let sourceTotal = groups.reduce(0) { $0 + $1.streams.count }
-        VStack(alignment: .leading, spacing: Theme.Space.sm) {
-            HStack(spacing: Theme.Space.sm) {
-                Button {
-                    Task { await playMovie() }
-                } label: {
-                    HStack(spacing: Theme.Space.sm) {
-                        if preparing { ProgressView().tint(Theme.Palette.onAccent) }
-                        else { Image(systemName: "play.fill") }
-                        Text(movieLabel)
-                    }
+        // FlowLayout so the action chips wrap to a new line on a narrow phone instead of compressing into
+        // vertical slivers ("Sou / rce") under the hero's hard width cap.
+        FlowLayout(spacing: Theme.Space.sm) {
+            Button {
+                Task { await playMovie() }
+            } label: {
+                HStack(spacing: Theme.Space.sm) {
+                    if preparing { ProgressView().tint(Theme.Palette.onAccent) }
+                    else { Image(systemName: "play.fill") }
+                    Text(movieLabel)
                 }
-                .buttonStyle(PrimaryActionStyle())
-                .disabled(!movieReady || preparing)
-                .opacity(movieReady || preparing ? 1 : 0.55)
-
-                qualityMenu(groups)
             }
-            HStack(spacing: Theme.Space.sm) {
-                Button { scrollToSources() } label: {
-                    Label(sourceTotal > 0 ? "Sources · \(sourceTotal)" : "Sources",
-                          systemImage: "list.bullet")
-                }
-                .buttonStyle(ChipButtonStyle())
+            .buttonStyle(PrimaryActionStyle())
+            .disabled(!movieReady || preparing)
+            .opacity(movieReady || preparing ? 1 : 0.55)
 
-                trailerButton
-                iOSLibraryChip()
-                Spacer(minLength: 0)
+            qualityMenu(groups)
+
+            Button { scrollToSources() } label: {
+                Label(sourceTotal > 0 ? "Sources · \(sourceTotal)" : "Sources",
+                      systemImage: "list.bullet")
             }
+            .buttonStyle(ChipButtonStyle())
+
+            trailerButton
+            iOSLibraryChip()
         }
         .padding(.top, Theme.Space.xs)
     }

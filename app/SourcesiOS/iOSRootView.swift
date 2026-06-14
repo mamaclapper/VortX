@@ -199,7 +199,8 @@ struct iOSHomeView: View {
                         // (#11), falling back to opening detail when no remembered link fits. Long-press
                         // offers the engine's "Remove from Continue Watching" (#14).
                         PosterRail(title: "Continue Watching", items: continueWatchingItems,
-                                   onTap: handleContinueWatchingTap, menu: .continueWatching)
+                                   onTap: handleContinueWatchingTap, menu: .continueWatching,
+                                   onDetails: { path.append(FeaturedHeroItem.from(rail: $0)) })
                     }
                     ForEach(core.boardRows) { row in
                         if !row.items.isEmpty {
@@ -1020,6 +1021,8 @@ private struct PosterRail: View {
     let onTap: (RailItem) -> Void
     /// Which long-press context menu each card shows on this surface (#14).
     var menu: iOSPosterMenu = .none
+    /// Opens a card's detail page (used by the Continue Watching menu's Details item, since a CW tap resumes).
+    var onDetails: ((RailItem) -> Void)? = nil
     @EnvironmentObject private var theme: ThemeManager   // observe textScale so Theme.Typography repaints live
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.sm) {
@@ -1030,7 +1033,8 @@ private struct PosterRail: View {
                     ForEach(items) { item in
                         Button { onTap(item) } label: {
                             PosterCardiOS(id: item.id, name: item.name, poster: item.poster,
-                                          progress: item.progress, menu: menu)
+                                          progress: item.progress, menu: menu,
+                                          onDetails: onDetails.map { od in { od(item) } })
                         }
                         .buttonStyle(.plain)
                         .accessibilityElement(children: .ignore)
@@ -1056,9 +1060,11 @@ private struct PosterCardiOS: View {
     let progress: Double
     /// Which long-press menu to attach (#14). `.none` attaches none.
     var menu: iOSPosterMenu = .none
+    /// Per-card "open details" action, wired into the Continue Watching menu's Details item.
+    var onDetails: (() -> Void)? = nil
     @EnvironmentObject private var theme: ThemeManager   // observe textScale so Theme.Typography repaints live
     var body: some View {
-        card.modifier(PosterContextMenu(id: id, menu: menu))
+        card.modifier(PosterContextMenu(id: id, menu: menu, onDetails: onDetails))
     }
 
     private var card: some View {
@@ -1099,6 +1105,10 @@ private struct PosterCardiOS: View {
 private struct PosterContextMenu: ViewModifier {
     let id: String
     let menu: iOSPosterMenu
+    /// Opens the title's detail page. On a Continue Watching card a tap RESUMES the remembered stream,
+    /// so the menu offers "Details" to reach the detail page instead (to pick a different episode or
+    /// source) — the touch/Mac twin of what the user expects from a long-press on the tvOS row.
+    var onDetails: (() -> Void)? = nil
 
     func body(content: Content) -> some View {
         if menu == .none {
@@ -1113,6 +1123,11 @@ private struct PosterContextMenu: ViewModifier {
         case .none:
             EmptyView()
         case .continueWatching:
+            if let onDetails {
+                Button { onDetails() } label: {
+                    Label("Details", systemImage: "info.circle")
+                }
+            }
             Button(role: .destructive) {
                 CoreBridge.shared.removeFromLibrary(id: id)
             } label: {

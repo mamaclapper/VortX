@@ -12,6 +12,9 @@ struct StremioXiOSApp: App {
     @StateObject private var account = StremioAccount()
     @StateObject private var core = CoreBridge.shared
     @Environment(\.scenePhase) private var scenePhase
+    /// Launch splash gate (the brand pinwheel animation), matching Apple TV. Cleared when it finishes;
+    /// it covers the engine + embedded-server boot moment on iPhone, iPad, and Mac too.
+    @State private var splashDone = false
 
     // macOS only: the embedded streaming server runs as a `node` CHILD PROCESS (MacNodeServer),
     // and Foundation does NOT kill that child when the app quits — it would be reparented to
@@ -57,6 +60,15 @@ struct StremioXiOSApp: App {
                 #if os(macOS)
                 .modifier(MacRootPlayerOverlay())
                 #endif
+                // Brand launch splash on top of everything (incl. the macOS player overlay) until its
+                // animation finishes — the iPhone/iPad/Mac twin of the tvOS RootTabView splash.
+                .overlay {
+                    if !splashDone {
+                        SplashView { splashDone = true }
+                            .ignoresSafeArea()
+                            .zIndex(100)
+                    }
+                }
                 .environmentObject(account)
                 .environmentObject(core)
                 .environmentObject(ThemeManager.shared)
