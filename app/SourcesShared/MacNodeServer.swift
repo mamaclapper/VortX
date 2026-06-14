@@ -24,10 +24,13 @@ enum NodeServer {
     private static var process: Process?
 
     /// Serializes all access to the mutable child state (`process`, `started`, `exitCode`,
-    /// `shutdownRequested`). startIfNeeded/restart/stop run on the main thread; the process's
-    /// terminationHandler fires on an arbitrary background thread. Funnelling every mutation
-    /// through one serial queue keeps them race-free without sprinkling locks. Matches the
-    /// serial-queue pattern used elsewhere in the shared sources (DiagnosticsLog, Keychain).
+    /// `shutdownRequested`). startIfNeeded/restart dispatch their work to this queue ASYNC so neither
+    /// app launch (which runs `reclaimStalePort`'s lsof/ps) nor the LAN-sharing toggle (which reaps
+    /// and respawns the child) ever blocks the main thread; stop() runs synchronously because it must
+    /// finish reaping the child before the app process exits. The process's terminationHandler fires
+    /// on an arbitrary background thread. Funnelling every mutation through one serial queue keeps
+    /// them race-free without sprinkling locks. Matches the serial-queue pattern used elsewhere in
+    /// the shared sources (DiagnosticsLog, Keychain).
     private static let queue = DispatchQueue(label: "com.stremiox.mac.nodeserver")
 
     /// Set by `stop()` so the terminationHandler treats the kill as an intentional app-exit
@@ -142,7 +145,7 @@ enum NodeServer {
     /// Spawn the node server once. Idempotent. No-op if the node binary or server.js is missing,
     /// or if the app is already shutting down (so a late call can't resurrect a killed server).
     static func startIfNeeded() {
-        queue.sync {
+        queue.async {
             guard !started, !shutdownRequested else { return }
             guard let nodeBin = Bundle.main.path(forResource: "node-darwin-arm64", ofType: nil) else {
                 NSLog("StremioX: node binary not found in bundle, streaming server disabled")
@@ -167,7 +170,7 @@ enum NodeServer {
     /// the app is shutting down. This is a RESTART, NOT a shutdown: it does NOT set
     /// `shutdownRequested`, so the server comes back up afterwards.
     static func restart() {
-        queue.sync {
+        queue.async {
             guard !shutdownRequested,
                   !PlaybackSettings.torrentsDisabled,
                   let nodeBin = Bundle.main.path(forResource: "node-darwin-arm64", ofType: nil),
