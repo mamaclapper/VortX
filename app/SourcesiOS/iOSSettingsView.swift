@@ -448,17 +448,24 @@ struct iOSSettingsView: View {
 
     @ViewBuilder private var audioSubtitleSection: some View {
         Section {
+            // Each menu Picker carries its OWN .tint plus an .id keyed to the accent. UIKit only
+            // re-realizes the FIRST menu Picker per Section when the inherited Form tint changes, so
+            // without this the 2nd+ pickers' trailing value labels kept the previous accent color
+            // (the "not all settings change colour" report, #21 follow-up). The .id forces a rebuild.
             Picker("Audio language", selection: $prefAudioLang) {
                 ForEach(languageOptions, id: \.id) { Text($0.label).tag($0.id) }
             }
+            .tint(Theme.Palette.accent).id(theme.accentID)
             Picker("Subtitle language", selection: $prefSubLang) {
                 ForEach(languageOptions, id: \.id) { Text($0.label).tag($0.id) }
             }
+            .tint(Theme.Palette.accent).id(theme.accentID)
             Picker("Subtitles", selection: $prefForced) {
                 ForEach(TrackPreferences.ForcedPolicy.allCases, id: \.rawValue) {
                     Text($0.label).tag($0.rawValue)
                 }
             }
+            .tint(Theme.Palette.accent).id(theme.accentID)
         } header: {
             Text("Audio & Subtitles")
         } footer: {
@@ -481,12 +488,16 @@ struct iOSSettingsView: View {
 
     @ViewBuilder private var subtitleSection: some View {
         Section {
+            // Per-Picker .tint + .id(accentID) so every value label repaints on accent change, not
+            // just the first one in the section (see Audio & Subtitles note, #21 follow-up).
             Picker("Font", selection: $subFont) {
                 ForEach(SubtitleStyle.fonts, id: \.id) { Text($0.label).tag($0.id) }
             }
+            .tint(Theme.Palette.accent).id(theme.accentID)
             Picker("Size", selection: $subSize) {
                 ForEach(SubtitleStyle.sizes, id: \.id) { Text($0.label).tag($0.id) }
             }
+            .tint(Theme.Palette.accent).id(theme.accentID)
             Stepper(value: subSizeScaleBinding,
                     in: SubtitleStyle.sizeScaleRange,
                     step: SubtitleStyle.sizeScaleStep) {
@@ -495,9 +506,11 @@ struct iOSSettingsView: View {
             Picker("Color", selection: $subColor) {
                 ForEach(SubtitleStyle.colors, id: \.id) { Text($0.label).tag($0.id) }
             }
+            .tint(Theme.Palette.accent).id(theme.accentID)
             Picker("Background", selection: $subBackground) {
                 ForEach(SubtitleStyle.backgrounds, id: \.id) { Text($0.label).tag($0.id) }
             }
+            .tint(Theme.Palette.accent).id(theme.accentID)
         } header: {
             Text("Subtitle Style")
         } footer: {
