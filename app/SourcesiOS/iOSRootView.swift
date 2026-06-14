@@ -1213,6 +1213,13 @@ extension View {
                     }
                 }
             }
+            // #4: a translucent (frosted) top bar, so the hero and content read as scrolling under a
+            // blurred chrome rather than a flat opaque strip. iOS-only — macOS hoists the principal
+            // wordmark into the unified window titlebar, which has no navigation-bar background to style.
+            #if os(iOS)
+            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            #endif
     }
 
     /// A scroll/drag on a browse screen quiets the ambient hero rotation; the model resumes it after a
