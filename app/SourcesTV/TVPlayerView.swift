@@ -57,6 +57,10 @@ struct TVPlayerView: View {
     // every playhead tick (audit #1): updated only when their inputs change.
     @State private var metadataLine = ""
     @State private var currentSkip: SkipSegment?
+    /// Cumulative seek amount shown in a brief pill while seeking with the chrome HIDDEN (Netflix-style
+    /// L/R seek that doesn't reveal the control bar). nil = no pill. Cleared after a short delay.
+    @State private var hiddenSeekDelta: Double?
+    @State private var hiddenSeekTask: Task<Void, Never>?
     // The open panel's rows, computed ONCE per open/refresh. The rows used to be a
     // computed property read by the panel body, which re-rendered ~4x a second with
     // the clock; for Sources that meant re-ranking a thousand-plus streams on the
@@ -237,6 +241,7 @@ struct TVPlayerView: View {
             if showOptions { optionsPanel }
             if loadFailed { loadErrorOverlay }
             if controlsHidden, let seg = currentSkip { skipPill(seg) }
+            if controlsHidden, let d = hiddenSeekDelta { hiddenSeekPill(d) }
             if showStats, !loadFailed { statsOverlay }
             if showStreamQR, let link = shareLink {
                 StreamLinkQRView(title: isTorrentPlayback ? "Magnet link" : "Stream link", link: link)
@@ -343,7 +348,11 @@ struct TVPlayerView: View {
             case .playPause: toggle()
             case .select:
                 if let seg = currentSkip { skipTo(seg) } else { showControls() }   // pill up → skip, else reveal
-            default: showControls()                       // any swipe reveals the bar
+            // Netflix-style seek-while-hidden: Left/Right nudge -/+10s directly, with a brief time pill,
+            // WITHOUT revealing the whole control bar. Up/Down (and any other press) still reveal it.
+            case .leftArrow: hiddenSeek(-10)
+            case .rightArrow: hiddenSeek(10)
+            default: showControls()                       // up/down + any swipe reveals the bar
             }
             return
         }
@@ -1436,6 +1445,38 @@ struct TVPlayerView: View {
     private func skipTo(_ segment: SkipSegment) {
         coordinator.player?.seek(to: segment.end)
         currentTime = segment.end
+    }
+
+    /// Seek by `delta` seconds while the chrome is HIDDEN, without revealing the control bar. A direct
+    /// relative seek plus a brief cumulative time pill, so quick Left/Right nudges don't force the whole
+    /// bar up (the competitor-parity "seek-while-hidden"). No media yet (duration 0) falls back to reveal.
+    private func hiddenSeek(_ delta: Double) {
+        guard duration > 0 else { showControls(); return }
+        seek(delta)
+        withAnimation { hiddenSeekDelta = (hiddenSeekDelta ?? 0) + delta }   // accumulate rapid presses
+        hiddenSeekTask?.cancel()
+        hiddenSeekTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(0.9))
+            guard !Task.isCancelled else { return }
+            withAnimation { hiddenSeekDelta = nil }
+        }
+    }
+
+    /// The seek-amount pill shown bottom-center while seeking with the chrome hidden (mirrors skipPill).
+    private func hiddenSeekPill(_ delta: Double) -> some View {
+        let s = Int(delta)
+        return VStack {
+            Spacer()
+            HStack(spacing: Theme.Space.sm) {
+                Image(systemName: s >= 0 ? "goforward" : "gobackward")
+                Text(s >= 0 ? "+\(s)s" : "\(s)s").fontWeight(.semibold).monospacedDigit()
+            }
+            .padding(.horizontal, Theme.Space.xl).padding(.vertical, Theme.Space.md)
+            .foregroundStyle(Theme.Palette.textPrimary)
+            .background(.ultraThinMaterial, in: Capsule())
+            .padding(.bottom, Theme.Space.screenEdge * 3)
+        }
+        .transition(.opacity)
     }
 
     /// The "Skip Intro / Skip Outro" pill, bottom-trailing. Shown only while watching (controls hidden);
