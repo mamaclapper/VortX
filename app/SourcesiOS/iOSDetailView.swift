@@ -208,7 +208,7 @@ struct iOSDetailView: View {
         .onDisappear { torrentPrime?.cancel() }
         // Flip the spinner to "No sources found" if resolution hangs past 12s (mirrors iOSEpisodeStreams).
         .task {
-            try? await Task.sleep(for: .seconds(12))
+            try? await Task.sleep(for: .seconds(20))
             settleTimedOut = true
         }
         .platformFullScreenPlayerCover(item: $presentation) { item in
@@ -1033,7 +1033,7 @@ struct iOSEpisodeStreams: View {
         }
         .onDisappear { torrentPrime?.cancel() }
         .task {
-            try? await Task.sleep(for: .seconds(12))
+            try? await Task.sleep(for: .seconds(20))
             settleTimedOut = true
         }
         .platformFullScreenPlayerCover(item: $player) { launch in
