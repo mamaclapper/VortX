@@ -158,7 +158,18 @@ enum StremioServer {
                 var req = URLRequest(url: url)
                 req.httpMethod = "POST"
                 req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                req.httpBody = try? JSONSerialization.data(withJSONObject: ["cacheSize": cap])
+                // cacheSize bounds the ON-DISK piece cache. It does NOT bound the engine's in-memory
+                // piece map: the disk storage backend writes each completed 512KB piece into a native
+                // Buffer (off-heap, so it never shows in the JS heap — the "heap flat at 27MB, RSS to
+                // 1.5GB" signature) and only frees it once the piece's verification group is whole AND
+                // the SINGLE-worker disk writer (bagpipe(1)) has drained it. With 55 default connections
+                // feeding pieces out-of-order, partial verify-groups pile up faster than they drain and
+                // the process gets jetsam-killed on iOS. Halving the connection count keeps far fewer
+                // partial groups in flight, so pieces verify+commit+free promptly and the in-memory map
+                // stays bounded. btMaxConnections flows through enginefs.getDefaults -> engine.connections.
+                // (Direct/debrid streams never touch this path; this only matters for torrent playback.)
+                let body: [String: Any] = ["cacheSize": cap, "btMaxConnections": 24]
+                req.httpBody = try? JSONSerialization.data(withJSONObject: body)
                 _ = try? await URLSession.shared.data(for: req)
                 return
             }

@@ -21,15 +21,14 @@ struct FeaturedHeroView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
 
-    /// Hero band height. On iOS the band now bleeds UP under the frosted nav + status bar (#4 immersive
-    /// top), so it is taller by roughly that chrome height to keep the bottom-anchored title/meta/actions
-    /// in view below the bar rather than tucked under it. Mac keeps its height (it doesn't bleed; the
-    /// wordmark lives in the unified titlebar).
+    /// Hero band height. iOS uses the 0.3.0 height (320): the taller 420 immersive band that bled up under
+    /// the nav bar felt cramped on a phone, so the user reverted it. macOS keeps 460 and DOES bleed up under
+    /// the transparent titlebar (the wordmark lives in the unified titlebar), so its taller band reads well.
     static var heroHeight: CGFloat {
         #if os(macOS)
         return 460
         #else
-        return 420
+        return 320
         #endif
     }
 
