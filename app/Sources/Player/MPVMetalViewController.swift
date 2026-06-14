@@ -48,16 +48,14 @@ final class MPVMetalViewController: PlatformViewController {
     var hdrAvailable : Bool = false
     private let mpvLog = Logger(subsystem: "com.stremiox.app", category: "mpv")
     private var configuredLiveMode = false
-    /// The dynamic range currently applied to the output chain (mpv transfer curve,
-    /// Metal layer colorspace, and on tvOS the display mode). Tracked so the sig-peak
-    /// observer, which fires on every video reconfigure, only reapplies on change.
-    /// NOTE: mpv's own target-colorspace-hint must stay OFF here. It is unsupported
-    /// on the Metal/MoltenVK backend and known to crash it (double free); the app
-    /// does the HDR signalling itself in syncDisplayDynamicRange.
-    /// The dynamic range currently applied to the output chain, or nil = "unknown, force a fresh apply".
-    /// Reset to nil on every file load + teardown so the FIRST re-evaluation of a new file always applies
-    /// (the guard `range != appliedDynamicRange` can never be swallowed by a stale value), which is what
-    /// makes an in-place HDR episode switch reliably re-enter HDR — and correctly drop HDR->SDR too.
+    /// The dynamic range currently applied to the output chain (mpv transfer curve, Metal layer
+    /// colorspace, and on tvOS the display mode), or nil = "unknown, force a fresh apply". Reset to nil on
+    /// every file load and teardown so the FIRST re-evaluation of a new file always applies (the guard
+    /// `range != appliedDynamicRange` can never be swallowed by a stale value): an in-place HDR episode
+    /// switch reliably re-enters HDR, and an HDR-to-SDR switch correctly drops it.
+    /// NOTE: mpv's own target-colorspace-hint must stay OFF. It is unsupported on the Metal/MoltenVK
+    /// backend and known to crash it (double free); the app does the HDR signalling itself in
+    /// syncDisplayDynamicRange.
     private var appliedDynamicRange: ContentDynamicRange? = nil
     
     override func viewDidLoad() {

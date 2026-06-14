@@ -6,20 +6,25 @@ What is planned next is in [ROADMAP.md](ROADMAP.md). To request a feature or rep
 
 ## 0.3.1 - 2026-06-14
 
-A bug-fix and polish pass on top of 0.3.0, driven by on-device testing. Cut as a prerelease to verify the streaming-server and movie fixes on real devices before promoting it to the latest release.
+A bug-fix and polish pass on top of 0.3.0, driven by on-device testing. Cut as a prerelease to verify the streaming-server, movie, and player fixes on real devices before promoting it to the latest release.
 
 ### Fixed
-- **Movies now find all your add-ons, not just the 2-3 fastest.** Movie pages under-queried add-ons (Apple TV used the engine's stream guess; iPhone/iPad/Mac skipped the stream load when the title's meta was already loaded without its streams). Series were unaffected. The source-resolution timeout is also longer (20s) for slow add-ons.
-- **The streaming server should hold up better on iPhone.** The embedded server runs inside the app, so it shares the app's memory budget, and 4K playback could push it past the iOS limit and kill the server. Two changes cut peak memory: the per-app memory ceiling is raised via a system entitlement, and a debrid or direct stream now uses a 256 MB read-ahead instead of 512 MB on iPhone, iPad, and Apple TV. If the server does stop, Settings now offers a one-tap relaunch.
-- **Continue Watching resume gets the in-player episode controls.** Resuming a series from Continue Watching now offers Next, Previous, and the episode list, the same as playing from the detail page.
-- **Source rows no longer show the resolution twice** when an add-on is named after a quality (for example an add-on literally called "1080p").
+- **Movies now query all your add-ons, not just the fastest few.** Movie pages under-queried add-ons; series were unaffected. The source-resolution timeout is also longer (20s) for slow add-ons. If a movie still shows only a couple of add-ons, the Sources list now names the ones that errored or returned nothing, so the cause is visible on-device.
+- **The embedded streaming server is harder to kill on iPhone.** It runs inside the app and shares the app's memory, so heavy torrent buffering could push it past the iOS limit. Peak memory is cut several ways: a raised per-app ceiling (system entitlement), a 256 MB read-ahead on iPhone, iPad, and Apple TV, and fewer simultaneous torrent connections so downloaded pieces are written out and freed instead of piling up in memory. A server restart now lives in Settings (a true in-place restart on Mac; on iPhone it relaunches the app).
+- **HDR no longer washes out after an in-place episode switch.** Auto-advancing or skipping between two HDR episodes re-applies the HDR output reliably, instead of occasionally staying in SDR until a fresh replay.
+- **Continue Watching, Next, and Previous now pick the best source, not the first to answer.** The player waits for add-ons to settle before choosing, so resuming or switching episodes lands on the quality you were watching (the 4K, not a stray 1080p), and the in-player Sources button reliably appears on a Continue Watching resume.
+- **Continue Watching resume gets the in-player episode controls** (Next, Previous, and the episode list), the same as playing from the detail page.
+- **Source rows no longer show the resolution twice** when an add-on is named after a quality.
 
 ### Added
-- **Audio Passthrough mode** (Settings, Audio Output): bitstream Dolby and DTS to an AV receiver that decodes them. (The existing Surround mode already decodes Dolby/DTS to multichannel PCM, the fix for a soundbar that drops DTS to stereo.)
-- **Sticky release group across episodes** (quality no longer jumps mid-season), an **immersive frosted top bar** with the hero artwork behind it, and a **readable centered content column** on wide iPad and Mac windows.
+- **Audio Passthrough**, now reachable both in Settings (Audio Output) and from the in-player Audio control: bitstream Dolby and DTS to an AV receiver that decodes them. Surround mode still decodes them to multichannel PCM, the fix for a soundbar that drops DTS to stereo.
+- **Richer source rows**: the HDR variant (Dolby Vision, HDR10+, HDR10), audio (Atmos, TrueHD, DTS-HD), channel layout, and codec, matching what Stremio shows.
+- **Local scrub-preview thumbnails**, captured while you watch, so dragging the seek bar shows a frame preview even without a server storyboard. Contributed by OrigamiSpace.
+- **Scroll arrows on catalog rows** (Mac, and iPad with a pointer), so a long row is easy to page through without a trackpad swipe.
+- **Sticky release group across episodes**, and on Mac the hero artwork now bleeds full-bleed under the translucent titlebar. The taller immersive top bar tried on iPhone was reverted; iPhone keeps the 0.3.0 browse layout.
 
 ### Notes
-- Coming next, with on-device verification: HDR rendering correctly after an in-place episode switch (a fresh replay is the current workaround), and Mac arrow-key navigation plus the immersive bar on Mac.
+- Still being verified on real devices: streaming-server memory under sustained torrent playback, and movie add-on coverage. Mac keyboard navigation is next.
 
 ## 0.3.0 - 2026-06-14
 

@@ -86,8 +86,24 @@ private final class LocalTrickplayFrameCache {
     private let ttl: TimeInterval = 48 * 3600
     private let maxDiskBytes: Int64 = 256 * 1024 * 1024
     private let ioQueue = DispatchQueue(label: "com.stremiox.trickplay.localcache", qos: .utility)
-    private var memory: [String: [Int: ScrubImage]] = [:]
+    /// Bounded in-memory layer of decoded thumbnails. NSCache caps the resident count AND auto-evicts
+    /// under memory pressure (it observes the system memory warning) — important on iOS, where this runs
+    /// in-process alongside the embedded streaming server and mpv's 4K decode buffers, so an UNBOUNDED
+    /// frame map (the original [String:[Int:ScrubImage]], which neither store nor image(for:) ever pruned)
+    /// would add straight onto the jetsam pressure. Anything evicted stays on disk and re-decodes on demand.
+    private let memory: NSCache<NSString, ScrubImage> = {
+        let cache = NSCache<NSString, ScrubImage>()
+        #if os(iOS) || os(tvOS)
+        cache.countLimit = 40    // ~40 resident thumbnails; the embedded server shares this app's budget
+        #else
+        cache.countLimit = 240   // macOS server is a separate process, so the app can hold more
+        #endif
+        return cache
+    }()
     private var lastPrune = Date.distantPast
+
+    /// Composite NSCache key for one stream's time bucket (`#` never appears in the base64 stream prefix).
+    private func memKey(_ key: String, _ bucket: Int) -> NSString { "\(key)#\(bucket)" as NSString }
 
     private lazy var cacheDirectory: URL = {
         let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
@@ -104,7 +120,7 @@ private final class LocalTrickplayFrameCache {
     func hasFrames(for key: String?) -> Bool {
         guard let key, !key.isEmpty else { return false }
         return ioQueue.sync {
-            if let buckets = memory[key], !buckets.isEmpty { return true }
+            // NSCache isn't enumerable by prefix; the on-disk presence is the source of truth here.
             let prefix = filePrefix(for: key) + "-"
             let files = (try? FileManager.default.contentsOfDirectory(at: cacheDirectory, includingPropertiesForKeys: nil)) ?? []
             return files.contains { $0.lastPathComponent.hasPrefix(prefix) }
@@ -114,7 +130,7 @@ private final class LocalTrickplayFrameCache {
     func store(image: ScrubImage, data: Data, for key: String, time: Double) {
         let bucket = bucketFor(time)
         ioQueue.async {
-            self.memory[key, default: [:]][bucket] = image
+            self.memory.setObject(image, forKey: self.memKey(key, bucket))
             try? data.write(to: self.fileURL(for: key, bucket: bucket), options: .atomic)
             self.pruneIfNeeded()
         }
@@ -125,11 +141,11 @@ private final class LocalTrickplayFrameCache {
         return ioQueue.sync {
             let minBucket = max(0, target - maxLookbackBuckets)
             for bucket in stride(from: target, through: minBucket, by: -1) {
-                if let cached = memory[key]?[bucket] { return cached }
+                if let cached = memory.object(forKey: memKey(key, bucket)) { return cached }
                 let url = fileURL(for: key, bucket: bucket)
                 guard let data = try? Data(contentsOf: url),
                       let decoded = ScrubImage(data: data) else { continue }
-                memory[key, default: [:]][bucket] = decoded
+                memory.setObject(decoded, forKey: memKey(key, bucket))
                 return decoded
             }
             return nil
