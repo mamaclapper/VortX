@@ -263,11 +263,26 @@ struct iOSDetailView: View {
     /// Hero: full-bleed backdrop + scrim + title / meta / action row / synopsis. `scrollToSources`
     /// is wired into the movie action row's "Sources" button (the tvOS 3-action twin).
     private func hero(width: CGFloat, scrollToSources: @escaping () -> Void) -> some View {
-        ZStack(alignment: .bottomLeading) {
-            backdrop
-            VStack(alignment: .leading, spacing: Theme.Space.sm) {
-                titleOrLogo
-                metaRow
+        // Two stacked blocks, NOT one bottom-aligned ZStack over the backdrop. The backdrop is a
+        // fixed-height banner with ONLY the title + meta overlaid at its bottom; the action buttons and the
+        // (long) synopsis flow BELOW it on the canvas. Putting the whole column inside a bottom-aligned
+        // ZStack made a tall column (long synopsis + wrapped buttons) push the fixed-height backdrop down
+        // until it sat behind the buttons with the title stranded on black above — the "backdrop is so far
+        // down / layout is messy" report. A fixed banner keeps the art pinned to the top at any content height.
+        VStack(alignment: .leading, spacing: Theme.Space.md) {
+            ZStack(alignment: .bottomLeading) {
+                backdrop
+                VStack(alignment: .leading, spacing: Theme.Space.sm) {
+                    titleOrLogo
+                    metaRow
+                }
+                .padding(.horizontal, Theme.Space.md)
+                .padding(.bottom, Theme.Space.lg)
+                .frame(width: width, alignment: .leading)
+            }
+            .frame(width: width, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: Theme.Space.md) {
                 if type == "movie" {
                     watchNow(scrollToSources: scrollToSources)
                 } else {
@@ -283,13 +298,8 @@ struct iOSDetailView: View {
                 }
             }
             .padding(.horizontal, Theme.Space.md)
-            .padding(.bottom, Theme.Space.lg)
             .frame(width: width, alignment: .leading)
         }
-        // Hard-cap the hero to the EXACT viewport width passed from the body's GeometryReader. maxWidth:
-        // .infinity only bounds the upper limit — a non-wrapping child (the hero action button row) still
-        // reported a width wider than the screen, so the synopsis + buttons spilled off BOTH edges. A
-        // concrete width forces every child (incl. the button row, which compresses) to fit the screen.
         .frame(width: width, alignment: .leading)
     }
 
@@ -1020,35 +1030,40 @@ struct iOSEpisodeStreams: View {
     /// Episode backdrop + show eyebrow + episode title + S·E / air date / facts + overview, mirroring
     /// the tvOS `CoreEpisodeStreams` header block.
     private func hero(width: CGFloat) -> some View {
-        ZStack(alignment: .bottomLeading) {
-            backdrop
-            VStack(alignment: .leading, spacing: Theme.Space.sm) {
-                Text(meta.name.uppercased())
-                    .font(Theme.Typography.eyebrow).tracking(1.5)
-                    .foregroundStyle(Theme.Palette.accent)
-                Text(video.episodeTitle)
-                    .font(Theme.Typography.hero).tracking(-1)
-                    .foregroundStyle(Theme.Palette.textPrimary)
-                    .lineLimit(3).minimumScaleFactor(0.6)
-                    // Same left-clip guard as iOSDetailView.heroTitle: clamp to the available width so
-                    // the serif title wraps instead of forcing the ZStack wider than the viewport.
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
-                metaRow
-                if let overview = video.overview, !overview.isEmpty {
-                    Text(overview)
-                        .font(Theme.Typography.body)
-                        .foregroundStyle(Theme.Palette.textSecondary)
-                        .lineSpacing(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: 760, alignment: .leading)
+        // Fixed backdrop banner (show eyebrow + episode title + meta overlaid) with the overview flowing
+        // below on the canvas — same structure as iOSDetailView.hero, so a long episode synopsis can't push
+        // the backdrop down behind the text.
+        VStack(alignment: .leading, spacing: Theme.Space.md) {
+            ZStack(alignment: .bottomLeading) {
+                backdrop
+                VStack(alignment: .leading, spacing: Theme.Space.sm) {
+                    Text(meta.name.uppercased())
+                        .font(Theme.Typography.eyebrow).tracking(1.5)
+                        .foregroundStyle(Theme.Palette.accent)
+                    Text(video.episodeTitle)
+                        .font(Theme.Typography.hero).tracking(-1)
+                        .foregroundStyle(Theme.Palette.textPrimary)
+                        .lineLimit(3).minimumScaleFactor(0.6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
+                    metaRow
                 }
+                .padding(.horizontal, Theme.Space.md)
+                .padding(.bottom, Theme.Space.lg)
+                .frame(width: width, alignment: .leading)
             }
-            .padding(.horizontal, Theme.Space.md)
-            .padding(.bottom, Theme.Space.lg)
             .frame(width: width, alignment: .leading)
+
+            if let overview = video.overview, !overview.isEmpty {
+                Text(overview)
+                    .font(Theme.Typography.body)
+                    .foregroundStyle(Theme.Palette.textSecondary)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 760, alignment: .leading)
+                    .padding(.horizontal, Theme.Space.md)
+            }
         }
-        // Hard-cap the episode hero to the EXACT viewport width (same fix as iOSDetailView.hero).
         .frame(width: width, alignment: .leading)
     }
 
