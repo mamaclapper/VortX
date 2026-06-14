@@ -1309,6 +1309,15 @@ struct PlayerScreen: View {
                       Row(label: "Earlier  −0.1s", detail: now) { adjustAudioDelay(-0.1) },
                       Row(label: "Later  +0.1s", detail: now) { adjustAudioDelay(0.1) }]
             if audioDelay != 0 { rs.append(Row(label: "Reset sync") { adjustAudioDelay(-audioDelay) }) }
+            // Output mode, mirrored from Settings so it's reachable mid-playback (the "no passthrough
+            // in the player" report). Applies live; mpv re-opens the audio output on the change.
+            let mode = AudioOutputMode.current
+            rs.append(Row(label: "Output", isHeader: true))
+            for m in AudioOutputMode.allCases {
+                rs.append(Row(label: m.label, selected: m == mode) {
+                    coordinator.player?.setAudioOutputMode(m)
+                })
+            }
             return rs
         case .sources:
             return sourceRows()

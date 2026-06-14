@@ -798,6 +798,17 @@ final class MPVMetalViewController: PlatformViewController {
         setString("hwdec", on ? "videotoolbox" : "no")
     }
 
+    /// Switch the audio output policy (Auto / Stereo / Surround / Passthrough) on the playing file.
+    /// Persists the choice, then re-applies the channel layout and the spdif bitstream list live so it
+    /// takes effect without a reload — mpv re-opens the audio output when these properties change.
+    /// `channelPolicy` reads `AudioOutputMode.current`, so persisting first makes it reflect `mode`.
+    /// Setting `audio-spdif` to "" (when leaving Passthrough) tells mpv to decode to PCM again.
+    func setAudioOutputMode(_ mode: AudioOutputMode) {
+        UserDefaults.standard.set(mode.rawValue, forKey: AudioOutputMode.key)
+        setString("audio-channels", channelPolicy)
+        setString("audio-spdif", mode.spdifCodecs ?? "")
+    }
+
     /// Live numbers for the player's "Playback info" overlay.
     func playbackStats() -> [(String, String)] {
         guard mpv != nil else { return [] }

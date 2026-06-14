@@ -1082,28 +1082,72 @@ private struct PosterRail: View {
     /// Opens a card's detail page (used by the Continue Watching menu's Details item, since a CW tap resumes).
     var onDetails: ((RailItem) -> Void)? = nil
     @EnvironmentObject private var theme: ThemeManager   // observe textScale so Theme.Typography repaints live
+    /// Pointer hovering the rail (#3). Never fires on pure-touch iPhone, so the
+    /// scroll arrows reveal only on Mac / iPad-with-trackpad, where swiping a long
+    /// row is awkward. On touch the row stays swipe-only.
+    @State private var hovering = false
+    /// Left-edge index the arrows have paged to, so we can hide the back arrow at the start.
+    @State private var pageIndex = 0
+    private static let pageStride = 4
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.sm) {
             Text(title).font(Theme.Typography.cardTitle).foregroundStyle(Theme.Palette.textPrimary)
                 .padding(.horizontal, Theme.Space.md)
-            ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(spacing: Theme.Space.sm) {
-                    ForEach(items) { item in
-                        Button { onTap(item) } label: {
-                            PosterCardiOS(id: item.id, name: item.name, poster: item.poster,
-                                          progress: item.progress, menu: menu,
-                                          onDetails: onDetails.map { od in { od(item) } })
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    LazyHStack(spacing: Theme.Space.sm) {
+                        ForEach(items) { item in
+                            Button { onTap(item) } label: {
+                                PosterCardiOS(id: item.id, name: item.name, poster: item.poster,
+                                              progress: item.progress, menu: menu,
+                                              onDetails: onDetails.map { od in { od(item) } })
+                            }
+                            .buttonStyle(.plain)
+                            .id(item.id)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(item.name)
+                            .accessibilityHint("Opens details")
+                            .accessibilityValue(item.progress > 0 ? "\(Int(item.progress * 100)) percent watched" : "")
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel(item.name)
-                        .accessibilityHint("Opens details")
-                        .accessibilityValue(item.progress > 0 ? "\(Int(item.progress * 100)) percent watched" : "")
                     }
+                    .padding(.horizontal, Theme.Space.md)
                 }
-                .padding(.horizontal, Theme.Space.md)
+                .overlay(alignment: .leading) {
+                    if showArrows && pageIndex > 0 { railArrow(forward: false) { page(by: -1, proxy) } }
+                }
+                .overlay(alignment: .trailing) {
+                    if showArrows && pageIndex < items.count - 1 { railArrow(forward: true) { page(by: 1, proxy) } }
+                }
             }
         }
+        .onHover { hovering = $0 }
+    }
+
+    /// Arrows matter only when a pointer is present and the row actually overflows a page.
+    private var showArrows: Bool { hovering && items.count > Self.pageStride }
+
+    private func page(by direction: Int, _ proxy: ScrollViewProxy) {
+        let next = max(0, min(items.count - 1, pageIndex + direction * Self.pageStride))
+        pageIndex = next
+        withAnimation(.easeOut(duration: 0.28)) {
+            proxy.scrollTo(items[next].id, anchor: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func railArrow(forward: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: forward ? "chevron.right" : "chevron.left")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 38, height: 60)
+                .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, Theme.Space.xs)
+        .transition(.opacity)
+        .accessibilityLabel(forward ? "Scroll right" : "Scroll left")
     }
 }
 
