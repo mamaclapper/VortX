@@ -140,7 +140,18 @@ struct iOSHomeView: View {
     /// The hero's rotation pool: the first ~2-3 of Continue Watching, then the first items of the top
     /// catalog row, capped by the model. These are the titles a Home visitor sees first.
     private var heroCandidates: [FeaturedHeroItem] {
-        var items: [FeaturedHeroItem] = core.continueWatching.prefix(3).map(FeaturedHeroItem.from(cw:))
+        // A Continue-Watching entry carries only name + poster (no rating / year / genres), so a
+        // CW-sourced hero is bare until the slow background HTTP enrichment lands — and when that fetch
+        // is unreliable, the hero's meta row stays empty (the reported "no metadata on the backdrop").
+        // If the same title is ALSO in a loaded catalog row, seed from that CoreMeta instead: it carries
+        // the links-derived rating/year/genres (and a synopsis), so the hero shows its meta immediately,
+        // no network round-trip. Falls back to the bare CW seed + enrichment for titles not in a catalog.
+        let metaByID = Dictionary(core.boardRows.flatMap { $0.items }.map { ($0.id, $0) },
+                                  uniquingKeysWith: { first, _ in first })
+        var items: [FeaturedHeroItem] = core.continueWatching.prefix(3).map { cw in
+            if let meta = metaByID[cw.id] { return FeaturedHeroItem.from(meta: meta) }
+            return FeaturedHeroItem.from(cw: cw)
+        }
         if let row = core.boardRows.first(where: { !$0.items.isEmpty }) {
             items += row.items.prefix(3).map(FeaturedHeroItem.from(meta:))
         }
