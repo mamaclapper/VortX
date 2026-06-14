@@ -307,6 +307,13 @@ final class MPVMetalViewController: PlatformViewController {
         checkError(mpv_set_option_string(mpv, "demuxer-max-bytes", "256MiB"))
 #endif
 
+        // HLS: pick the HIGHEST-bandwidth variant of an adaptive master playlist. mpv's documented
+        // default is already `max`, but add-ons that serve a single adaptive master (e.g. KhmerHub's
+        // OK.ru streams) were starting at the lowest rendition — the "144p instead of 720p" report —
+        // so set it explicitly and unambiguously before init. (If a stream is proxied through the
+        // embedded server, the playlist rewrite must preserve all variants for this to take effect.)
+        checkError(mpv_set_option_string(mpv, "hls-bitrate", "max"))
+
 //        checkError(mpv_set_option_string(mpv, "target-colorspace-hint", "yes")) // HDR passthrough
 //        checkError(mpv_set_option_string(mpv, "tone-mapping-visualize", "yes"))  // only for debugging purposes
 //        checkError(mpv_set_option_string(mpv, "profile", "fast"))   // can fix frame drop in poor device when play 4k
