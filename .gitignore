@@ -35,3 +35,18 @@ app/Resources/node-darwin-arm64
 .claude/
 app/Resources/fonts/
 graphify-out/
+
+# Internal working docs (planning, handoff, audits, design/product context).
+# Kept locally for our own use; never published to the repo.
+/HANDOFF.md
+/PRODUCT.md
+/DESIGN.md
+/docs/PLAN.md
+/docs/FEATURE-PARITY.md
+/docs/0.3.0-PRD.md
+/docs/REVIEW-WORKLIST.md
+/docs/PLATFORM-ACQUISITION.md
+/docs/PLAYER-CONTROLS-DEBUG.md
+/docs/REBASE-iOS.md
+/docs/REBASE-stremio-core.md
+/docs/superpowers/
