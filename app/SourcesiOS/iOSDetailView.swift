@@ -120,6 +120,10 @@ struct iOSDetailView: View {
                     }
                 }
                 .padding(.bottom, Theme.Space.xl)
+                // Cap the whole detail column to the viewport width and pin it leading, so no single
+                // section (hero, season chips, source rows) can stretch the column wider than the
+                // screen and center it, which clipped every leading element off the left edge.
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .background(Theme.Palette.canvas.ignoresSafeArea())
@@ -206,6 +210,11 @@ struct iOSDetailView: View {
             .padding(.bottom, Theme.Space.lg)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // Cap the ZStack's OWN reported width to the viewport. The inner backdrop/title clamps make
+        // each child flexible, but a ZStack still reports the widest child's demand UP to the scroll
+        // column; without this the column went wider than the screen and centered, shoving the title /
+        // buttons / sections off the left edge. Mirrors tvOS DetailView.hero + FeaturedHeroView.
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Full-bleed artwork with the same two scrims tvOS uses: a vertical canvas fade so the lower text
@@ -556,6 +565,8 @@ struct iOSDetailView: View {
             .padding(.bottom, Theme.Space.lg)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // Cap the live hero ZStack's own width to the viewport (same fix as iOSDetailView.hero).
+        .frame(maxWidth: .infinity, alignment: .leading)
         epgStrip
         liveSourceSection
     }
@@ -869,6 +880,7 @@ struct iOSEpisodeStreams: View {
                 .padding(.horizontal, Theme.Space.md)
             }
             .padding(.bottom, Theme.Space.xl)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Theme.Palette.canvas.ignoresSafeArea())
         .navigationTitle(video.episodeTitle)
@@ -922,6 +934,8 @@ struct iOSEpisodeStreams: View {
             .padding(.bottom, Theme.Space.lg)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // Cap the episode hero ZStack's own width to the viewport (same fix as iOSDetailView.hero).
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var backdrop: some View {
