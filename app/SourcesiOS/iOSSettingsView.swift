@@ -322,6 +322,15 @@ struct iOSSettingsView: View {
                     } label: {
                         Label("Server log", systemImage: "doc.text.magnifyingglass")
                     }
+                    // The in-process Node server CANNOT re-init once it exits (a nodejs-mobile limit), so
+                    // if it has died (e.g. memory pressure while the app was backgrounded on lock) the only
+                    // way back is a fresh launch. Shown only once it has actually exited: a one-tap quit so
+                    // the user reopens to a clean server, instead of silent playback failures.
+                    if NodeServer.exitCode != nil {
+                        Button(role: .destructive) { exit(0) } label: {
+                            Label("Restart server (quits StremioX, then reopen it)", systemImage: "arrow.clockwise")
+                        }
+                    }
                 }
                 #endif
 
