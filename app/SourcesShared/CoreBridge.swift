@@ -59,6 +59,7 @@ final class CoreBridge: ObservableObject {
         if !ok { NSLog("[CoreBridge] stremiox_core_init failed"); return }
         bootstrapAuth()
         seedInitialState()
+        scheduleSessionRepair()   // runs on EVERY launch path: covers the force-close add-on-loss desync
     }
 
     /// Pull state the engine populated at construction (e.g. `continue_watching_preview` from the
@@ -110,8 +111,7 @@ final class CoreBridge: ObservableObject {
         if isLoggedIn() {
             refreshFromAPI()
             loadBoard() // addons already hydrated from the engine's own storage
-            scheduleSessionRepair()
-            return
+            return       // scheduleSessionRepair() is now called once from start() for ALL paths
         }
         guard let key = Keychain.string(activeTokenAccount), !key.isEmpty else {
             NSLog("[CoreBridge] no auth token in Keychain; engine stays signed out")
@@ -126,19 +126,27 @@ final class CoreBridge: ObservableObject {
         dispatchCtx(["action": "PullUserFromAPI", "args": ["token": key]])
     }
 
-    /// Self-heal a stale engine session. The engine can be "logged in" with a session the API no
-    /// longer honors (it happened in the wild after an account-slot bug): every sync then silently
-    /// returns nothing and the library + Continue Watching sit empty forever. If no account data
-    /// has arrived a while after the launch refresh, re-establish the session from the stored
-    /// token, which makes the engine pull addons + the full library fresh.
+    /// Self-heal a stale or INCOMPLETE engine session. Two failure modes seen in the wild, both of
+    /// which leave the UI "signed in" (the Keychain token persists immediately) while the engine's own
+    /// state is wrong:
+    ///  - a session the API no longer honors (an old account-slot bug) → library + Continue Watching
+    ///    sit empty forever; and
+    ///  - a force-close that lost the just-pulled add-ons before the engine's async storage write
+    ///    flushed (the engine persists fire-and-forget) → the engine comes back with NO stream-capable
+    ///    add-on, so every title reports "no sources" until a manual logout/login. This is the
+    ///    user-reported "force close → lost all my addons but still shows logged in" bug.
+    /// If, a while after launch, the stored token says we're signed in but the engine has no account
+    /// data OR no stream add-on, re-establish the session from the token — the engine then pulls
+    /// add-ons + the full library fresh. Runs once per launch and never fights an in-flight auth/switch.
     private func scheduleSessionRepair() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [weak self] in
-            guard let self else { return }
-            let cwItems = self.decode(CoreCWPreview.self, field: "continue_watching_preview")?.items ?? []
-            let libraryEmpty = self.library?.catalog.isEmpty ?? true
-            guard self.continueWatching.isEmpty, cwItems.isEmpty, libraryEmpty,
+        DispatchQueue.main.asyncAfter(deadline: .now() + 14) { [weak self] in
+            guard let self, !self.switchInFlight, !self.awaitingAuthMigration,
                   let key = Keychain.string(self.activeTokenAccount), !key.isEmpty else { return }
-            NSLog("[CoreBridge] session present but no account data arrived; re-authenticating with the stored token")
+            let cwItems = self.decode(CoreCWPreview.self, field: "continue_watching_preview")?.items ?? []
+            let noAccountData = self.continueWatching.isEmpty && cwItems.isEmpty && (self.library?.catalog.isEmpty ?? true)
+            let noStreamAddon = !self.addons.contains { $0.providesStreams }
+            guard noAccountData || noStreamAddon else { return }
+            NSLog("[CoreBridge] signed in but \(noStreamAddon ? "engine has no stream add-on" : "no account data arrived") — re-authenticating with the stored token to re-pull add-ons + library")
             self.switchAccount(token: key)
         }
     }
