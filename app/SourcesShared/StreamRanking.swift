@@ -22,6 +22,7 @@ enum StreamRanking {
         cacheLock.lock(); defer { cacheLock.unlock() }
         if let hit = regexCache[pattern] { return hit }
         guard let compiled = try? NSRegularExpression(pattern: pattern) else { return nil }
+        if regexCache.count > 256 { regexCache.removeAll() }   // defensive cap; the pattern set is fixed today
         regexCache[pattern] = compiled
         return compiled
     }
@@ -63,8 +64,8 @@ enum StreamRanking {
         guard let hint, !hint.isEmpty else { return 0 }
         let text = qualityText(s)
         var bonus = 0
-        for res in ["2160", "1080", "720"] where hint.contains(res) {
-            if text.contains(res) { bonus += 800 }
+        for res in ["2160", "1080", "720"] where boundedMatch(hint, "\(res)p?") {
+            if boundedMatch(text, "\(res)p?") { bonus += 800 }
             break
         }
         if hint.contains("remux"), text.contains("remux") { bonus += 500 }
