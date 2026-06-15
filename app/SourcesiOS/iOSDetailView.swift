@@ -1454,6 +1454,9 @@ struct iOSSourceList: View {
     enum SourceSort: String, CaseIterable, Identifiable {
         case best = "Best", size = "Size", seeders = "Seeders"
         var id: String { rawValue }
+        /// Lowercase persistence key ("best" / "size" / "seeders"), so the chosen sort is remembered.
+        var key: String { String(describing: self) }
+        init(key: String) { self = SourceSort.allCases.first { $0.key == key } ?? .best }
     }
 
     /// The streams of `group`, reordered by the active sort. Best leaves the engine ranking intact;
@@ -1673,6 +1676,9 @@ struct iOSSourceList: View {
                 Spacer(minLength: 0)
             }
             .padding(.vertical, Theme.Space.xs)
+            // Open the list in the sort the user last chose, and remember any change (per the Settings default).
+            .onAppear { sortMode = SourceSort(key: SourcePreferences.shared.defaultSourceSort) }
+            .onChange(of: sortMode) { newValue in SourcePreferences.shared.defaultSourceSort = newValue.key }
         }
     }
 

@@ -36,6 +36,12 @@ final class SourcePreferences: ObservableObject {
     static let excludeKey            = "stremiox.streaming.excludeKeywords"
     static let includeKey            = "stremiox.streaming.includeKeywords"
     static let safetyKey             = "stremiox.streaming.safetyMode"
+    static let hideDeadKey           = "stremiox.streaming.hideDeadTorrents"
+    static let instantOnlyKey        = "stremiox.streaming.instantOnly"
+    static let maxResolutionKey      = "stremiox.streaming.maxResolution"
+    static let hdrOnlyKey            = "stremiox.streaming.hdrOnly"
+    static let excludeAV1Key         = "stremiox.streaming.excludeAV1"
+    static let defaultSortKey        = "stremiox.streaming.defaultSourceSort"
 
     // Max possible quality score is ~13,800 (4K + cached + remux + HDR + atmos + file-size cap).
     // A 15,000-point tier gap means the preferred type ALWAYS beats a lower type regardless of quality.
@@ -69,6 +75,40 @@ final class SourcePreferences: ObservableObject {
     @Published var safetyMode: String {
         didSet { UserDefaults.standard.set(safetyMode, forKey: Self.safetyKey) }
     }
+    /// Drop torrents an add-on EXPLICITLY reports as 0-seeders (dead swarms). Off by default. Torrents
+    /// with no reported seeder count are kept (unknown is not the same as dead).
+    @Published var hideDeadTorrents: Bool {
+        didSet { UserDefaults.standard.set(hideDeadTorrents, forKey: Self.hideDeadKey) }
+    }
+    /// Show only sources that play instantly: cached debrid and plain direct links, never an uncached
+    /// debrid result or a raw torrent that has to download first. Off by default.
+    @Published var instantOnly: Bool {
+        didSet { UserDefaults.standard.set(instantOnly, forKey: Self.instantOnlyKey) }
+    }
+    /// Cap the resolution of shown sources (0 = unlimited, else 4000 / 1080 / 720). Only drops a source
+    /// whose KNOWN resolution exceeds the cap, so unlabelled sources are kept. Off (0) by default.
+    @Published var maxResolution: Int {
+        didSet { UserDefaults.standard.set(maxResolution, forKey: Self.maxResolutionKey) }
+    }
+    /// Show only HDR / Dolby Vision sources. Off by default (aggressive, hides most SDR releases).
+    @Published var hdrOnly: Bool {
+        didSet { UserDefaults.standard.set(hdrOnly, forKey: Self.hdrOnlyKey) }
+    }
+    /// Hide AV1 sources (Apple devices have no AV1 hardware decode, so 4K AV1 struggles). Off by default.
+    @Published var excludeAV1: Bool {
+        didSet { UserDefaults.standard.set(excludeAV1, forKey: Self.excludeAV1Key) }
+    }
+    /// The remembered Sources-list sort ("best" / "size" / "seeders"), so the list opens the way the user
+    /// last left it. "best" (the engine ranking) by default.
+    @Published var defaultSourceSort: String {
+        didSet { UserDefaults.standard.set(defaultSourceSort, forKey: Self.defaultSortKey) }
+    }
+
+    /// True when none of the opt-in filters are engaged, so the ranking can take its no-op fast path.
+    var noFiltersActive: Bool {
+        excludeTerms.isEmpty && includeTerms.isEmpty && safetyMode == "off"
+            && !hideDeadTorrents && !instantOnly && !hdrOnly && !excludeAV1 && maxResolution == 0
+    }
 
     /// Parsed, lowercased, non-empty exclude / include terms.
     var excludeTerms: [String] { Self.terms(excludeKeywords) }
@@ -83,6 +123,12 @@ final class SourcePreferences: ObservableObject {
         excludeKeywords = UserDefaults.standard.string(forKey: Self.excludeKey) ?? ""
         includeKeywords = UserDefaults.standard.string(forKey: Self.includeKey) ?? ""
         safetyMode      = UserDefaults.standard.string(forKey: Self.safetyKey) ?? "off"
+        hideDeadTorrents = UserDefaults.standard.bool(forKey: Self.hideDeadKey)
+        instantOnly     = UserDefaults.standard.bool(forKey: Self.instantOnlyKey)
+        maxResolution   = UserDefaults.standard.integer(forKey: Self.maxResolutionKey)
+        hdrOnly         = UserDefaults.standard.bool(forKey: Self.hdrOnlyKey)
+        excludeAV1      = UserDefaults.standard.bool(forKey: Self.excludeAV1Key)
+        defaultSourceSort = UserDefaults.standard.string(forKey: Self.defaultSortKey) ?? "best"
     }
 
     private static func readOrder() -> [SourceType] {

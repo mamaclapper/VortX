@@ -450,23 +450,30 @@ enum StreamRanking {
     /// preferences pass everything, so this is a no-op until the user opts in.
     static func passesUserFilters(_ s: CoreStream) -> Bool {
         let prefs = SourcePreferences.shared
-        let exclude = prefs.excludeTerms, include = prefs.includeTerms, safety = prefs.safetyMode
-        if exclude.isEmpty, include.isEmpty, safety == "off" { return true }   // fast path: nothing set
+        if prefs.noFiltersActive { return true }   // fast path: nothing opted in
         let text = qualityText(s)
+        let exclude = prefs.excludeTerms, include = prefs.includeTerms
         if exclude.contains(where: { text.contains($0) }) { return false }
         if !include.isEmpty, !include.contains(where: { text.contains($0) }) { return false }
-        switch safety {
+        switch prefs.safetyMode {
         case "balanced": if junkClass(text) != nil { return false }
         case "strict":   if junkClass(text) != nil || implausibleForResolution(text) { return false }
         default: break
         }
+        if prefs.instantOnly, !isCached(s, text) { return false }                       // only cached / direct
+        if prefs.hideDeadTorrents, sourceType(s, text) == .torrent,
+           let seeders = seederCount(text), seeders == 0 { return false }               // explicitly-dead swarm
+        if prefs.excludeAV1, boundedMatch(text, "av1") { return false }                 // no Apple AV1 hw decode
+        if prefs.hdrOnly, !(text.contains("hdr") || text.contains("dolby vision")
+            || text.contains("dolbyvision") || text.contains("dovi")) { return false }
+        if prefs.maxResolution > 0, resolution(text) > prefs.maxResolution { return false }  // cap known resolutions
         return true
     }
 
     /// Drop streams that fail the user filters, and any group left empty. No-op when nothing is set.
     static func applyUserFilters(_ groups: [CoreStreamSourceGroup]) -> [CoreStreamSourceGroup] {
         let prefs = SourcePreferences.shared
-        guard !(prefs.excludeTerms.isEmpty && prefs.includeTerms.isEmpty && prefs.safetyMode == "off") else { return groups }
+        guard !prefs.noFiltersActive else { return groups }
         return groups.compactMap { group in
             let kept = group.streams.filter { passesUserFilters($0) }
             return kept.isEmpty ? nil : CoreStreamSourceGroup(id: group.id, addon: group.addon, streams: kept)

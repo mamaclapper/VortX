@@ -1116,7 +1116,7 @@ private struct PosterGrid: View {
         LazyVGrid(columns: columns, alignment: .center, spacing: Theme.Space.md) {
             ForEach(items) { item in
                 Button { onTap(item) } label: {
-                    PosterCardiOS(id: item.id, name: item.name, poster: item.poster, fallbackArt: item.background,
+                    PosterCardiOS(id: item.id, name: item.name, poster: item.poster, fallbackArt: item.background, imdbRating: item.imdbRating,
                                   progress: item.progress, menu: menu)
                 }
                 .buttonStyle(.plain)
@@ -1161,7 +1161,7 @@ private struct PosterRail: View {
                     LazyHStack(spacing: Theme.Space.sm) {
                         ForEach(items) { item in
                             Button { onTap(item) } label: {
-                                PosterCardiOS(id: item.id, name: item.name, poster: item.poster, fallbackArt: item.background,
+                                PosterCardiOS(id: item.id, name: item.name, poster: item.poster, fallbackArt: item.background, imdbRating: item.imdbRating,
                                               progress: item.progress, menu: menu,
                                               onDetails: onDetails.map { od in { od(item) } })
                             }
@@ -1288,6 +1288,8 @@ private struct PosterCardiOS: View {
     /// Backdrop to fall back to when an add-on item carries no `poster` (AIOMetadata sometimes omits it),
     /// so the tile shows the title's art cropped to the card instead of a blank surface. Nil = no fallback.
     var fallbackArt: String? = nil
+    /// IMDb rating to show as a small star badge on the poster, when the catalog item carries one. Nil hides it.
+    var imdbRating: String? = nil
     let progress: Double
     /// Which long-press menu to attach (#14). `.none` attaches none.
     var menu: iOSPosterMenu = .none
@@ -1309,6 +1311,18 @@ private struct PosterCardiOS: View {
                     .frame(width: 120, height: 180)
                     .clipped()
                     .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+                    .overlay(alignment: .topTrailing) {
+                        if let rating = imdbRating, !rating.isEmpty {
+                            HStack(spacing: 2) {
+                                Image(systemName: "star.fill").font(.system(size: 8))
+                                Text(rating).font(.system(size: 10, weight: .semibold))
+                            }
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5).padding(.vertical, 2)
+                            .background(.black.opacity(0.6), in: Capsule())
+                            .padding(5)
+                        }
+                    }
                 if progress > 0.01 {
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {

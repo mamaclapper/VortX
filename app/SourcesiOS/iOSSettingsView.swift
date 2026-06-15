@@ -337,6 +337,16 @@ struct iOSSettingsView: View {
                 #if os(iOS)
                 .textInputAutocapitalization(.never)
                 #endif
+            Toggle("Instant sources only", isOn: $sourcePrefs.instantOnly).tint(Theme.Palette.accent)
+            Toggle("Hide dead torrents", isOn: $sourcePrefs.hideDeadTorrents).tint(Theme.Palette.accent)
+            Toggle("HDR sources only", isOn: $sourcePrefs.hdrOnly).tint(Theme.Palette.accent)
+            Toggle("Hide AV1 sources", isOn: $sourcePrefs.excludeAV1).tint(Theme.Palette.accent)
+            Picker("Max quality", selection: $sourcePrefs.maxResolution) {
+                Text("Unlimited").tag(0)
+                Text("4K").tag(4000)
+                Text("1080p").tag(1080)
+                Text("720p").tag(720)
+            }
         } header: {
             Text("Streams")
         } footer: {
