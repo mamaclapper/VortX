@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Base Info.plist for the macOS app. Xcode merges its GENERATE_INFOPLIST_FILE keys
+	     (CFBundleName from PRODUCT_NAME=VortX, the version keys, LSMinimumSystemVersion,
+	     NSHighResolutionCapable, the rest) on top of this, so we declare ONLY what generation
+	     cannot express. This file must stay macOS-only: do not reuse Resources/Info-iOS.plist
+	     here, it carries iOS-only keys (UIBackgroundModes, launch screen, scene manifest, the
+	     iOS player URL schemes). -->
+
+	<!-- Allow plain-http custom streaming servers, the same exception the iOS and tvOS builds
+	     already carry. macOS enforces App Transport Security by default, so cleartext http:// to any
+	     non-loopback host is blocked. That is why a user pointing VortX at a plain-http server reached
+	     over Tailscale (the 100.64.0.0/10 CGNAT range, which is neither loopback nor a private LAN
+	     range) failed on Mac while it worked on iOS, and why the embedded 127.0.0.1 server keeps
+	     working regardless (loopback is ATS-exempt). NSAllowsArbitraryLoads is the superset that
+	     covers loopback, LAN, and Tailscale, no https required (issue #58, macOS leg). Keep this the
+	     ONLY ATS key, the narrower keys override it when present. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+
+	<!-- macOS 15+ gates reaching a host on the local network behind a privacy permission that is
+	     separate from ATS. Tailscale rides a point-to-point tunnel rather than the LAN, so it does not
+	     trip this gate (iOS has the same gate and connects to the same server without a usage string),
+	     but a custom server on the real home LAN (192.168.x / 10.x) would. Declaring the usage string
+	     lets macOS present and grant that permission instead of denying the connection silently. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>VortX connects to the streaming server you point it at, such as one you run at home on your local network or reach over Tailscale.</string>
+</dict>
+</plist>

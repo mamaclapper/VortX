@@ -15,6 +15,13 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<!-- tvOS 16+ gates reaching a host on the local network behind a privacy permission separate from
+	     ATS. A custom server on the home LAN (192.168.x / 10.x) trips it; the usage string lets tvOS
+	     present and grant it instead of failing silently. Tailscale rides a tunnel, not the LAN, so it
+	     does not trip this gate (matches iOS, where the Tailscale server already connected with just the
+	     ATS key). No effect for embedded-server users (loopback is exempt). (issue #58) -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>VortX connects to the streaming server you point it at, such as one you run at home on your local network or reach over Tailscale.</string>
 	<!-- Schemes the player's "Play in" handoff may probe with canOpenURL; keep in sync
 	     with ExternalPlayers.candidates. -->
 	<key>LSApplicationQueriesSchemes</key>
