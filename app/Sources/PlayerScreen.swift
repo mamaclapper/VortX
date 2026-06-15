@@ -1458,9 +1458,23 @@ struct PlayerScreen: View {
         case .sources:
             return sourceRows()
         case .info:
+            var rows: [Row] = []
+            if let s = currentStream {
+                rows.append(Row(label: "Source", isHeader: true))
+                let release = String(sourceLabel(s).prefix(60))
+                if !release.isEmpty { rows.append(Row(label: "Release", detail: release)) }
+                if let file = s.behaviorHints?.filename, !file.isEmpty {
+                    rows.append(Row(label: "File", detail: file))
+                }
+                if let size = StreamRanking.sizeText(s) { rows.append(Row(label: "Size", detail: size)) }
+            }
             let stats = infoRows
-            if stats.isEmpty { return [Row(label: "No info yet", isHeader: true)] }
-            return stats.map { Row(label: $0.0, detail: $0.1) }
+            if !stats.isEmpty {
+                rows.append(Row(label: "Playback", isHeader: true))
+                rows.append(contentsOf: stats.map { Row(label: $0.0, detail: $0.1) })
+            }
+            if rows.isEmpty { return [Row(label: "No info yet", isHeader: true)] }
+            return rows
         case .playerSettings:
             let hw = coordinator.player?.hardwareDecoding ?? true
             return [
@@ -1519,6 +1533,13 @@ struct PlayerScreen: View {
     /// True when more than one playable source is loaded for the current title / episode.
     private var hasAlternateSources: Bool {
         currentSourceGroups.reduce(0) { $0 + $1.streams.filter { $0.playableURL != nil }.count } > 1
+    }
+
+    /// The stream currently on screen: the loaded source whose playable URL matches what mpv is playing.
+    /// Drives the Playback Info panel's source-file rows (release / filename / size). Nil for a pasted
+    /// direct link with no matching loaded source.
+    private var currentStream: CoreStream? {
+        currentSourceGroups.flatMap(\.streams).first { $0.playableURL == curURL }
     }
 
     /// More than one distinct resolution is available for the current title, so the Quality picker is worth

@@ -448,6 +448,24 @@ struct TVPlayerView: View {
         }
     }
 
+    /// The loaded source currently on screen (its playable URL matches what mpv is playing), used to
+    /// label the stats overlay with the release name and file size. Nil for a direct-resume link with
+    /// no matching loaded source.
+    private var currentStream: CoreStream? {
+        core.streamGroups().flatMap(\.streams).first { $0.playableURL == curURL }
+    }
+
+    /// Source rows prepended to the live stats: release name + size. The raw filename is omitted here
+    /// (the fixed-width overlay can't hold it); the iOS Playback Info list shows it in full.
+    private var sourceStatRows: [(String, String)] {
+        guard let s = currentStream else { return [] }
+        var rows: [(String, String)] = []
+        let release = String(sourceLabel(s).prefix(40))
+        if !release.isEmpty { rows.append(("Source", release)) }
+        if let size = StreamRanking.sizeText(s) { rows.append(("Size", size)) }
+        return rows
+    }
+
     /// Live playback numbers, top-left, refreshed every second while visible.
     private var statsOverlay: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -467,7 +485,7 @@ struct TVPlayerView: View {
         .padding(Theme.Space.xl)
         .task(id: showStats) {
             while showStats, !Task.isCancelled {
-                statsRows = coordinator.player?.playbackStats() ?? []
+                statsRows = sourceStatRows + (coordinator.player?.playbackStats() ?? [])
                 try? await Task.sleep(for: .seconds(1))
             }
         }
