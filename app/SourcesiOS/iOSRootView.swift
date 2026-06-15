@@ -51,6 +51,12 @@ struct iOSRootView: View {
     }
 
     @State private var tab: Tab = .home
+    /// A new release found by the once-per-foreground check, surfaced as a prominent top banner so users
+    /// learn about it without opening Settings. Dismissing it remembers the version, so it reappears only
+    /// when a still-newer build ships.
+    @ObservedObject private var updates = UpdateChecker.shared
+    @AppStorage("stremiox.update.dismissedVersion") private var dismissedUpdateVersion = ""
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         VStack(spacing: 0) {
@@ -74,8 +80,11 @@ struct iOSRootView: View {
 
             customTabBar
         }
+        .safeAreaInset(edge: .top, spacing: 0) { updateBanner }
         .background(Theme.Palette.canvas.ignoresSafeArea())
         .tint(Theme.Palette.accent)
+        .animation(.easeOut(duration: 0.25), value: updates.available?.version)
+        .animation(.easeOut(duration: 0.25), value: dismissedUpdateVersion)
         #if os(macOS)
         // macOS menu-bar commands (the "Go" menu + ⌘-shortcuts) post here, since they live at the
         // Scene level and can't set this @State directly. The raw value mirrors Tab's order.
@@ -106,6 +115,44 @@ struct iOSRootView: View {
             }
             .ignoresSafeArea(edges: .bottom)
         }
+    }
+
+    /// Prominent accent bar shown across every tab when a newer release is available and not yet
+    /// dismissed for that version. Tapping opens the downloads page; the × remembers this version.
+    @ViewBuilder private var updateBanner: some View {
+        if let u = updates.available, u.version != dismissedUpdateVersion {
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.down.circle.fill").font(.system(size: 18, weight: .semibold))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Update available").font(.system(size: 14, weight: .semibold))
+                    Text("\(u.name) · tap to get it")
+                        .font(.system(size: 12)).foregroundStyle(Theme.Palette.onAccent.opacity(0.85)).lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                Button { dismissedUpdateVersion = u.version } label: {
+                    Image(systemName: "xmark").font(.system(size: 13, weight: .bold))
+                        .padding(8).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss update notice")
+            }
+            .foregroundStyle(Theme.Palette.onAccent)
+            .padding(.horizontal, 16).padding(.vertical, 10)
+            .background(Theme.Palette.accent)
+            .contentShape(Rectangle())
+            .onTapGesture { openReleasesPage() }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Update available: \(u.name). Opens the downloads page.")
+            .accessibilityAddTraits(.isButton)
+            .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
+    /// Open the GitHub releases page (where the signed IPA / dmg lives) in the browser. Cross-platform
+    /// via SwiftUI's openURL, so no UIKit/AppKit import is needed here.
+    private func openReleasesPage() {
+        guard let url = URL(string: "https://github.com/mamaclapper/StremioX/releases/latest") else { return }
+        openURL(url)
     }
 
     private func tabButton(_ item: Tab) -> some View {
