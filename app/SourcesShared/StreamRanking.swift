@@ -121,29 +121,38 @@ enum StreamRanking {
     private static func computeScore(_ s: CoreStream) -> Int {
         let text = qualityText(s)
         var score = resolution(text)
-        // Source ladder, the consensus ordering every parser converges on:
+        // Source ladder: STRICT and the dominant WITHIN-resolution key (issue #68 — a remux must beat
+        // a bigger WEB-DL). The gaps (remux->bluray 80, bluray->web 75) both exceed the most a lower
+        // source can earn from features + size (56 + 12 = 68), so source type strictly outranks them.
         // remux > bluray > web-dl > webrip > hdtv > dvdrip > tv captures.
-        if text.contains("remux") { score += 250 }
-        else if text.contains("bluray") || text.contains("blu-ray") || boundedMatch(text, #"b[dr][ .\-_]?rip"#) { score += 120 }
-        else if boundedMatch(text, #"web[ .\-_]?dl"#) { score += 100 }
-        else if boundedMatch(text, #"web[ .\-_]?rip"#) { score += 40 }
-        else if boundedMatch(text, "web") { score += 100 }   // scene bare "WEB" tag = WEB-DL
+        if text.contains("remux") { score += 230 }
+        else if text.contains("bluray") || text.contains("blu-ray") || boundedMatch(text, #"b[dr][ .\-_]?rip"#) { score += 150 }
+        else if boundedMatch(text, #"web[ .\-_]?dl"#) { score += 75 }
+        else if boundedMatch(text, #"web[ .\-_]?rip"#) { score += 50 }
+        else if boundedMatch(text, "web") { score += 75 }   // scene bare "WEB" tag = WEB-DL
         else if text.contains("hdtv") { score -= 150 }
         else if boundedMatch(text, #"dvd[ .\-_]?rip"#) { score -= 200 }
         else if text.contains("tvrip") || text.contains("satrip") || boundedMatch(text, #"pdtv"#) { score -= 300 }
-        if text.contains("hdr") || text.contains("dolby vision") || text.contains("dolbyvision") || text.contains("dovi") {
-            score += 80
-        }
-        // File size is the strongest objective quality signal WITHIN a resolution tier: a 4K remux is
-        // 30-80 GB, a 4K WEB-DL is 3-10 GB, and bigger means higher bitrate. Without this, Watch Now
-        // saw a basic 4K and a 4K remux as near-ties and played whichever add-on answered first. Scaled
-        // and capped (~600) so it decides between same-resolution sources but never lifts a 1080p over a 4K.
-        score += min(Int(sizeGB(text) * 6), 600)
-        // Lossless / object-based audio is a real upgrade on a capable system (eARC soundbar, AV receiver),
-        // so it breaks remaining ties toward the better-sounding source.
-        if text.contains("atmos") || text.contains("truehd") || text.contains("true-hd") { score += 70 }
-        else if text.contains("dts-hd") || text.contains("dts hd") || text.contains("dts-ma") { score += 50 }
-        else if text.contains("dts") { score += 20 }
+        // Video range, fine-grained: DV > HDR10+ > HDR10/HLG > SDR. Checked specific-first so HDR10+
+        // is not swallowed by the generic "hdr" test. Any HDR is effectively strict over SDR; the
+        // gradations between HDR flavours are soft (a size tiebreak can nudge), which is fine.
+        if text.contains("dolby vision") || text.contains("dolbyvision") || text.contains("dovi") { score += 30 }
+        else if text.contains("hdr10+") || text.contains("hdr10plus") { score += 24 }
+        else if text.contains("hdr") || text.contains("hlg") { score += 18 }
+        // File size is now a SMALL final tiebreaker (cap +12), not a primary signal: it only orders
+        // otherwise-equal streams (same resolution, source, and features) toward the bigger, higher-
+        // bitrate file. It used to score up to +600 and could lift a big WEB-DL over a smaller remux
+        // (the #68 bug); source type and features now sit strictly above it.
+        score += min(Int(sizeGB(text) * 0.15), 12)
+        // Audio quality ladder (object-based > lossless > lossy), additive with the video range above.
+        if text.contains("atmos") { score += 26 }
+        else if text.contains("dts:x") || text.contains("dtsx") || text.contains("dts-x") { score += 24 }
+        else if text.contains("truehd") || text.contains("true-hd") { score += 20 }
+        else if text.contains("dts-hd ma") || text.contains("dts-hd.ma") || text.contains("dts-ma") { score += 16 }
+        else if text.contains("dts-hd") || text.contains("dts hd") || text.contains("dtshd") || text.contains("flac") || text.contains("lpcm") || boundedMatch(text, "pcm") { score += 12 }
+        else if text.contains("eac3") || text.contains("e-ac3") || text.contains("dd+") || text.contains("ddp") || text.contains("ddplus") { score += 8 }
+        else if text.contains("dts") { score += 6 }
+        else if text.contains("ac3") || boundedMatch(text, "dd") || text.contains("dolby digital") { score += 4 }
         // Apple TV has no AV1 hardware decode on any model, so 4K AV1 lands on software decode
         // and struggles; 1080p AV1 is fine but still worth a nudge toward HEVC/H.264 peers.
         if boundedMatch(text, "av1") {
@@ -162,7 +171,7 @@ enum StreamRanking {
         // so cache and the source-type order still win first. Untagged releases (most
         // English originals) are never penalised.
         score += languageScore(text)
-        // Cached dominates WITHIN its tier: +8000 clears the maximum quality spread (~5800), so
+        // Cached dominates WITHIN its tier: +8000 clears the maximum quality spread (~4300), so
         // a cached stream always beats an uncached one of the same source type, which is the
         // "uncached debrid kept winning" fix. It stays SMALLER than the 15k tier gap on purpose:
         // the user's source-type order is the top-level key, so someone who ranks Torrent or
