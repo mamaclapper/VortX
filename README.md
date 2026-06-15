@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/vortx-logo.svg" width="560" alt="VortX">
+  <img src="docs/vortx-banner.svg" width="560" alt="VortX">
 </p>
 
 <p align="center">
