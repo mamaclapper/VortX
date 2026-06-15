@@ -126,6 +126,12 @@ struct RootView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { TabBarHealer.heal("player-closed") }
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { TabBarHealer.heal("player-closed+3s") }
         }
+        // The picker dismissing (or a profile switch settling) makes the shell visible again; re-assert
+        // the bar in case it desynced while hidden, so the menu is never missing on return (issue #75).
+        .onChange(of: profiles.needsPicker) {
+            guard !profiles.needsPicker, presenter.request == nil else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { TabBarHealer.heal("picker-dismissed") }
+        }
     }
 
     /// Cold start with a real choice, or Settings' "Switch Profile". Dismissing with Menu counts

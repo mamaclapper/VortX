@@ -45,7 +45,15 @@ struct StremioTVApp: App {
                 // Distinguishes "the system suspended us" (an unhandled menu press)
                 // from "we crashed" when a device report says the app vanished.
                 DiagnosticsLog.log("app", "scenePhase → \(String(describing: phase))")
-                if phase == .active { UpdateChecker.shared.checkIfStale() }
+                if phase == .active {
+                    UpdateChecker.shared.checkIfStale()
+                    // The top tab bar can desync (park offscreen) across a background/foreground cycle,
+                    // the same "vanishing tab bar" the player-close heal fixes. Re-assert it on return so
+                    // the menu never stays gone after the Home button (issue #75). Two shots: the desync
+                    // can surface only after the first layout settles.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { TabBarHealer.heal("foreground") }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { TabBarHealer.heal("foreground+1.5s") }
+                }
             }
             .onAppear {
                 // Profile housekeeping (the library repair scan + sync probe) is background work;
