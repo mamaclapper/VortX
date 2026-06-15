@@ -246,9 +246,9 @@ struct TVPlayerView: View {
             if showInfo && !showOptions && !loadFailed { controlBar }
             if showOptions { optionsPanel }
             if loadFailed { loadErrorOverlay }
-            if controlsHidden, let seg = currentSkip, upNextRemaining == nil { skipPill(seg) }
+            if controlsHidden, let seg = currentSkip, upNextRemaining == nil, !isCreditsUpNext { skipPill(seg) }
             if controlsHidden, let d = hiddenSeekDelta { hiddenSeekPill(d) }
-            if controlsHidden, upNextRemaining != nil { upNextBand }
+            if controlsHidden, upNextRemaining != nil || isCreditsUpNext { upNextBand }
             if showStats, !loadFailed { statsOverlay }
             if showStreamQR, let link = shareLink {
                 StreamLinkQRView(title: isTorrentPlayback ? "Magnet link" : "Stream link", link: link)
@@ -354,7 +354,7 @@ struct TVPlayerView: View {
             // Up Next band visible: it owns Left/Right/Select/Down (pick + activate + dismiss) so they
             // never fall through to the seek-while-hidden nudge below. Menu (exit), Play/Pause, and Up
             // still behave normally, so the band never traps the remote.
-            if upNextRemaining != nil {
+            if upNextRemaining != nil || isCreditsUpNext {
                 switch type {
                 case .leftArrow:  upNextWantsCredits = false; return   // focus Play Now
                 case .rightArrow: upNextWantsCredits = true;  return   // focus Watch Credits
@@ -1659,7 +1659,7 @@ struct TVPlayerView: View {
     private func upNextButton(_ title: String, systemImage: String?, highlighted: Bool) -> some View {
         HStack(spacing: 8) {
             if let img = systemImage { Image(systemName: img) }
-            Text(title)
+            Text(title).lineLimit(1)
         }
         .font(.headline.weight(.semibold))
         .foregroundStyle(highlighted ? Theme.Palette.onAccent : Theme.Palette.textPrimary)
@@ -1667,6 +1667,7 @@ struct TVPlayerView: View {
         .background(highlighted ? AnyShapeStyle(Theme.Palette.accent) : AnyShapeStyle(.white.opacity(0.16)), in: Capsule())
         .overlay(Capsule().stroke(Theme.Palette.canvas, lineWidth: highlighted ? 3 : 0))
         .scaleEffect(highlighted ? 1.06 : 1.0)
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     // MARK: - Episode navigation (series only; `episodes` is the season's ordered list)
@@ -1687,6 +1688,14 @@ struct TVPlayerView: View {
         let remaining = duration - currentTime
         guard remaining > 0, remaining <= 20 else { return nil }
         return Int(remaining.rounded(.up))
+    }
+    /// Show the Up Next band IN PLACE of the credits Skip pill: the moment the play head enters a
+    /// credits segment (the same detection that drove the old Skip-Credits pill) and a next episode
+    /// exists, the band owns the bottom-right corner so the two never fight for it (the band used to
+    /// only appear in the last 20s, surfacing "after the credits were gone"). The last episode (no
+    /// next) keeps its plain Skip pill. Its countdown line still appears only inside the last-20s window.
+    private var isCreditsUpNext: Bool {
+        currentSkip?.kind == .credits && hasNextEpisode && !upNextSuppressed && duration > 60
     }
     /// Label of the episode that plays next, for the Up Next band.
     private var nextEpisodeLabel: String? {

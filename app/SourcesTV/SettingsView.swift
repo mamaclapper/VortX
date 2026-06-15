@@ -41,6 +41,7 @@ struct SettingsView: View {
                     appearanceSection
                     audioSubtitleSection
                     subtitleSection
+                    backupSection
                     aboutSection
                 }
                 .padding(.horizontal, Theme.Space.screenEdge)
@@ -471,6 +472,18 @@ struct SettingsView: View {
     }
 
     // MARK: About
+
+    private var backupSection: some View {
+        section("Backup & Restore") {
+            Text("A backup saves your profiles, theme, and player preferences so they travel with you, for example when StremioX becomes VortX. On iPhone, iPad, and Mac you can save that to a file today.")
+                .font(Theme.Typography.label)
+                .foregroundStyle(Theme.Palette.textSecondary)
+            Text("On Apple TV a scan-with-your-phone backup is coming: Backup will show a QR code, you scan it with your phone, and your settings save to your VortX account. Restore shows another code to bring them right back. Until then, signing in restores your library, add-ons, and watch history here.")
+                .font(Theme.Typography.label)
+                .foregroundStyle(Theme.Palette.textSecondary)
+                .padding(.top, Theme.Space.xs)
+        }
+    }
 
     private var aboutSection: some View {
         section("About") {

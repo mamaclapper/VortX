@@ -1,5 +1,6 @@
 import SwiftUI
 import UserNotifications
+import UniformTypeIdentifiers
 
 /// Touch Settings at full parity with the tvOS Settings screen: profiles, account, playback,
 /// stream-source ranking, the embedded streaming server, appearance, audio & subtitle preferences,
@@ -47,6 +48,12 @@ struct iOSSettingsView: View {
     @AppStorage(NewEpisodeNotifications.enabledKey) private var notifyNewEpisodes = true
     @AppStorage("stremiox.autoLandscapeInPlayer") private var autoLandscapeInPlayer = true
 
+    // Backup & Restore: carry local settings across the StremioX -> VortX move (see SettingsBackup).
+    @State private var showBackupExporter = false
+    @State private var showBackupImporter = false
+    @State private var backupDocument: BackupDocument?
+    @State private var backupAlert: BackupAlert?
+
     var body: some View {
         NavigationStack {
             Form {
@@ -64,6 +71,7 @@ struct iOSSettingsView: View {
                 appearanceSection.listRowBackground(Theme.Palette.surface1)
                 audioSubtitleSection.listRowBackground(Theme.Palette.surface1)
                 subtitleSection.listRowBackground(Theme.Palette.surface1)
+                backupSection.listRowBackground(Theme.Palette.surface1)
                 aboutSection.listRowBackground(Theme.Palette.surface1)
                 engineSection.listRowBackground(Theme.Palette.surface1)
             }
@@ -80,6 +88,35 @@ struct iOSSettingsView: View {
             .tint(Theme.Palette.accent)
             .navigationTitle("Settings")
             .sheet(isPresented: $showSignIn) { iOSSignInView() }
+            .fileExporter(isPresented: $showBackupExporter, document: backupDocument,
+                          contentType: .json, defaultFilename: SettingsBackup.defaultFilename()) { result in
+                switch result {
+                case .success:
+                    backupAlert = BackupAlert(title: "Backup Saved",
+                        message: "Keep this file safe. Restore it in VortX to bring your settings across.")
+                case .failure(let error):
+                    backupAlert = BackupAlert(title: "Backup Failed", message: error.localizedDescription)
+                }
+            }
+            .fileImporter(isPresented: $showBackupImporter, allowedContentTypes: [.json]) { result in
+                switch result {
+                case .success(let url):
+                    do {
+                        let scoped = url.startAccessingSecurityScopedResource()
+                        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                        let count = try SettingsBackup.restore(from: try Data(contentsOf: url))
+                        backupAlert = BackupAlert(title: "Restore Complete",
+                            message: "\(count) settings restored. Relaunch the app to apply everything.")
+                    } catch {
+                        backupAlert = BackupAlert(title: "Restore Failed", message: error.localizedDescription)
+                    }
+                case .failure(let error):
+                    backupAlert = BackupAlert(title: "Restore Failed", message: error.localizedDescription)
+                }
+            }
+            .alert(item: $backupAlert) { info in
+                Alert(title: Text(info.title), message: Text(info.message), dismissButton: .default(Text("OK")))
+            }
             .platformFullScreenCover(item: $editingProfile) { profile in
                 ProfileEditorView(original: profile)
             }
@@ -651,6 +688,30 @@ struct iOSSettingsView: View {
 
     // MARK: About
 
+    private var backupSection: some View {
+        Section {
+            Button {
+                do {
+                    backupDocument = BackupDocument(data: try SettingsBackup.makeBackup())
+                    showBackupExporter = true
+                } catch {
+                    backupAlert = BackupAlert(title: "Backup Failed", message: error.localizedDescription)
+                }
+            } label: {
+                Label("Create Backup", systemImage: "arrow.up.doc")
+            }
+            Button {
+                showBackupImporter = true
+            } label: {
+                Label("Restore from Backup", systemImage: "arrow.down.doc")
+            }
+        } header: {
+            Text("Backup & Restore")
+        } footer: {
+            Text("Save your profiles, theme, and playback preferences to a file you can keep. When StremioX becomes VortX, restore that file to bring everything across. Your library and watch history return when you sign in to your account.")
+        }
+    }
+
     @ViewBuilder private var aboutSection: some View {
         Section("About") {
             if let update = updates.available {
@@ -682,6 +743,27 @@ struct iOSSettingsView: View {
             LabeledContent("Home rows", value: "\(core.boardRows.count)")
         }
     }
+}
+
+/// Wraps the backup JSON for SwiftUI's `.fileExporter` / `.fileImporter`. Works on iOS and
+/// macOS; tvOS has no document UI, so file backup lives on the other platforms.
+struct BackupDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+    var data: Data
+    init(data: Data) { self.data = data }
+    init(configuration: ReadConfiguration) throws {
+        data = configuration.file.regularFileContents ?? Data()
+    }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
+    }
+}
+
+/// Identifiable wrapper so a backup / restore result can drive a one-off `.alert(item:)`.
+struct BackupAlert: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
 }
 
 #if !os(macOS)

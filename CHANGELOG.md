@@ -4,6 +4,21 @@ All notable changes to StremioX, newest first. StremioX is Apple TV first, with 
 
 What is planned next is in [ROADMAP.md](ROADMAP.md). To request a feature or report a bug, start a [GitHub Discussion](https://github.com/mamaclapper/StremioX/discussions) or [open an issue](https://github.com/mamaclapper/StremioX/issues).
 
+## 0.3.5 - 2026-06-15
+
+StremioX is now VortX. This release puts on the new name, a new gold-on-obsidian icon, and an animated VortX intro, and it adds Backup & Restore so your settings can travel with you. It is an in-place update: your library, add-ons, history, and settings stay exactly as they are. Two reliability fixes ride along.
+
+### Added
+- **The app is now VortX.** A new name, a new gold-on-obsidian app icon, and an animated VortX launch screen on iPhone, iPad, Mac, and Apple TV. Same app and same account underneath, so nothing resets.
+- **Backup & Restore on iPhone, iPad, and Mac.** In Settings you can save your profiles, theme, and playback preferences to a file and restore them later. It is built for the road ahead: your library and watch history always return when you sign in, and this carries your local settings across too. On Apple TV a scan-with-your-phone backup is on the way; for now signing in restores your library there.
+
+### Fixed
+- **The Apple TV "Up Next" prompt shows reliably at the end of an episode.** It now takes the corner the moment the credits begin, in place of the old Skip Credits button, so Play Now and Watch Credits are always there when you reach for them, and the buttons no longer wrap or look uneven.
+- **The streaming server holds up better under load.** The in-app server gets a larger background worker pool, so busy moments (a torrent and subtitles fetching at once) are less likely to stall it.
+
+### Notes
+- Next up is VortX in full: the repository and docs move to the new name, with a website, a subreddit, and a Discord to follow.
+
 ## 0.3.4 - 2026-06-15
 
 A focused fix pass on top of 0.3.3, across iPhone, iPad, Mac, and Apple TV, clearing the issues found in 0.3.3 testing.

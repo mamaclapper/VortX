@@ -9,6 +9,31 @@
 
 The modern, native Stremio client for Apple devices. Fully native apps for Apple TV, iPhone, iPad, and Mac, all built on stremio-core and the libmpv player. Desktop and Android are next.
 
+## StremioX is now VortX
+
+<p align="center">
+  <img src="docs/vortx-logo.svg" width="560" alt="VortX">
+</p>
+
+StremioX is getting its own name. Starting with this release the app wears the new identity, **VortX**: a new app name, a new gold-on-obsidian icon, and an animated VortX intro. Same app, same direction, just its own identity now instead of borrowing another name to describe itself.
+
+**This update is in place. Nothing resets.** Your library, add-ons, watch history, and settings are exactly where you left them. It is still the same app underneath, signed into the same account.
+
+**Still to come**
+- The repository and the docs move to the VortX name next.
+- A website, a subreddit, and a Discord, so there is a real place to land, ask, and follow along.
+- A new default gold-on-obsidian theme. You can already pick any theme you like.
+
+**About a later, deeper move.** A future update will give VortX a fresh identity all the way down (a new app identifier). When that lands, your library and watch history still return the moment you sign in to your account, but purely local settings (themes, players, profiles) could start fresh. So this release adds **Backup & Restore**, the first half of a plan to make sure nothing is ever stuck on one device.
+
+### Backup, restore, and sync
+
+Three layers, so your setup always follows you:
+
+- **Your account already syncs the big things.** Your library, add-ons, and watch history live with your Stremio account and come back on any device the moment you sign in. That is automatic and does not change.
+- **Backup & Restore covers what the account does not hold (new in this release).** Your profiles, theme, player preferences, source filters, and server settings are local to each device. On iPhone, iPad, and Mac, open **Settings > Backup & Restore > Create Backup** to save all of that to a single file. No passwords are included: your account token stays in the Keychain and is never written to the file. **Restore** reads it back, including into a fresh install or into VortX after the deeper move. Keep the file somewhere safe (Files, iCloud Drive, AirDrop to another device).
+- **Apple TV, and where sync is heading.** tvOS has no file access, so a scan-with-your-phone backup is on the way: **Backup** shows a QR code, you scan it with your phone and sign in to a VortX account, and your settings save there; **Restore** shows another code to pull them straight back. That same mechanism becomes **VortX cloud sync**, so in time even local profiles and preferences sync across all your devices, the one gap the Stremio account does not cover today. It is built to carry over unchanged when VortX moves to its own core and server.
+
 ## Why this exists
 
 Stremio is a great engine and a great protocol, and StremioX is built on it. But the Apple apps fell behind. Stremio's Apple TV, iPhone, and iPad builds stopped getting updates and went stale while the platform moved on, and the Apple TV option stayed feature limited. Apple users, and Apple TV users especially, were left on an old build.

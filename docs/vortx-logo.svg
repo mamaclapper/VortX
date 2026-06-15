@@ -1,0 +1,34 @@
+<svg width="800" height="240" viewBox="0 0 800 240" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="VortX">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F59E0B"/>
+      <stop offset="0.55" stop-color="#D97706"/>
+      <stop offset="1" stop-color="#92400E"/>
+    </linearGradient>
+    <radialGradient id="ember" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#C2440F" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#C2440F" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1C1910"/>
+      <stop offset="1" stop-color="#0F0D0A"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Banner card: obsidian, self-contained so it reads on any GitHub theme -->
+  <rect x="2" y="2" width="796" height="236" rx="28" fill="url(#tile)"/>
+  <rect x="2.5" y="2.5" width="795" height="235" rx="27.5" fill="none" stroke="#D97706" stroke-opacity="0.28" stroke-width="1.5"/>
+
+  <!-- Mark: vortex X on a soft ember glow -->
+  <g transform="translate(58,0)">
+    <ellipse cx="120" cy="120" rx="92" ry="92" fill="url(#ember)"/>
+    <!-- two crossing ribbons, gently curved into a pinwheel/vortex -->
+    <path d="M66,58 C112,92 130,148 176,182" stroke="url(#gold)" stroke-width="30" stroke-linecap="round" fill="none"/>
+    <path d="M176,58 C130,92 112,148 66,182" stroke="url(#gold)" stroke-width="30" stroke-linecap="round" fill="none"/>
+    <circle cx="121" cy="120" r="11" fill="#FDF6E3"/>
+  </g>
+
+  <!-- Wordmark: VORT in warm white, X in gold -->
+  <text x="330" y="152" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="104" font-weight="800" letter-spacing="2" fill="#FDF6E3">VORT<tspan fill="url(#gold)">X</tspan></text>
+  <text x="334" y="196" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="22" font-weight="600" letter-spacing="7" fill="#C4A882">NATIVE FOR APPLE</text>
+</svg>

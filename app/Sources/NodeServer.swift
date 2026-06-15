@@ -68,6 +68,7 @@ enum NodeServer {
         // all share the libuv threadpool (default 4). Many dead trackers resolving slowly
         // can saturate it and stall the engine. 16 threads relieves that contention. Cheap
         // and harmless; the heartbeat in the preload tells us if the loop still freezes.
+        setenv("UV_THREADPOOL_SIZE", "16", 1)
         // CRITICAL (regression fix, #56): the in-process nodejs-mobile runtime CANNOT spawn child
         // processes in the iOS/tvOS sandbox, so the server's :12470 HTTPS endpoint and its HLSv2
         // transcoder (which shells out to ffmpeg via child_process.spawn) MUST be disabled — exactly
