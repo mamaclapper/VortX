@@ -30,7 +30,7 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "time"] }
 
 # HTTP for Env::fetch, rustls (no system OpenSSL/SecureTransport) so it stays a self-contained static lib.
 http = "1"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-tls"] }
 
 [profile.release]
 opt-level = "s"
