@@ -300,6 +300,17 @@ struct PlayerScreen: View {
             Button { leavePlayback() } label: { EmptyView() }
                 .keyboardShortcut(.cancelAction)
                 .hidden()
+            // Standard player keys on macOS: Space toggles play/pause, Left/Right seek by the skip step.
+            // Hidden buttons (same approach as the Esc handler) so they work without managing view focus.
+            Button { coordinator.player?.togglePause(); scheduleHide() } label: { EmptyView() }
+                .keyboardShortcut(.space, modifiers: [])
+                .hidden()
+            Button { seekBy(-seekStepSeconds) } label: { EmptyView() }
+                .keyboardShortcut(.leftArrow, modifiers: [])
+                .hidden()
+            Button { seekBy(seekStepSeconds) } label: { EmptyView() }
+                .keyboardShortcut(.rightArrow, modifiers: [])
+                .hidden()
             #endif
         }
         .animation(.easeOut(duration: 0.3), value: upNextRemaining != nil)
@@ -1118,13 +1129,19 @@ struct PlayerScreen: View {
     /// The seek-step setting as seconds, falling back to 10 if the stored value is somehow unparsable.
     private var seekStepSeconds: Double { Double(seekStep) ?? 10 }
 
+    /// Seek relative to the play head, clamped to the timeline, and report it. Shared by the on-screen skip
+    /// buttons and the macOS keyboard shortcuts.
+    private func seekBy(_ delta: Double) {
+        let target = min(max(currentTime + delta, 0), max(duration - 1, 0))
+        coordinator.player?.seek(to: target)
+        currentTime = target
+        if duration > 0 { onSeek(target, duration); lastReported = target }
+        scheduleHide()
+    }
+
     private func seekButton(_ icon: String, by delta: Double) -> some View {
         Button {
-            let target = min(max(currentTime + delta, 0), max(duration - 1, 0))
-            coordinator.player?.seek(to: target)
-            currentTime = target
-            if duration > 0 { onSeek(target, duration); lastReported = target }
-            scheduleHide()
+            seekBy(delta)
         } label: {
             Image(systemName: icon).font(.system(size: 30, weight: .semibold))
                 .foregroundStyle(.white).shadow(radius: 4).frame(width: 60, height: 60)
