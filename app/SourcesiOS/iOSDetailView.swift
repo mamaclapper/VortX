@@ -364,6 +364,7 @@ struct iOSDetailView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: 760, alignment: .leading)
                 }
+                creditsRows
             }
             .padding(.horizontal, Theme.Space.md)
             .frame(width: width, alignment: .leading)
@@ -459,6 +460,40 @@ struct iOSDetailView: View {
         .font(Theme.Typography.label)
         .foregroundStyle(Theme.Palette.textSecondary)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Cast / Director / Writer lines under the synopsis, each shown only when the meta carries it.
+    /// Top names are capped so a long IMDb cast list doesn't push the action row off-screen; the
+    /// label column is fixed-width so the three rows align like a small credits block.
+    @ViewBuilder private var creditsRows: some View {
+        let m = meta
+        let cast = m?.cast ?? []
+        let directors = m?.directors ?? []
+        let writers = m?.writers ?? []
+        if !cast.isEmpty || !directors.isEmpty || !writers.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                creditLine("Cast", cast.prefix(5))
+                creditLine("Director", directors.prefix(3))
+                creditLine("Writer", writers.prefix(3))
+            }
+            .frame(maxWidth: 760, alignment: .leading)
+            .padding(.top, Theme.Space.xs)
+        }
+    }
+
+    @ViewBuilder private func creditLine(_ label: String, _ names: ArraySlice<String>) -> some View {
+        if !names.isEmpty {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Space.sm) {
+                Text(label)
+                    .font(Theme.Typography.label)
+                    .foregroundStyle(Theme.Palette.textTertiary)
+                    .frame(width: 64, alignment: .leading)
+                Text(names.joined(separator: ", "))
+                    .font(Theme.Typography.label)
+                    .foregroundStyle(Theme.Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     // MARK: Series — hero Resume/Play affordance (mirrors tvOS DetailView.seriesPrimaryEpisode)
@@ -1366,6 +1401,26 @@ struct iOSSourceList: View {
     @State private var showAllSources = false           // the full ranked list is revealed on demand
     @State private var collapsed: Set<String> = []      // per-add-on sections the user folded away
     @State private var qualityTier: String? = nil       // second-level quality sheet (a resolution tier)
+    @State private var sortMode: SourceSort = .best     // how the rows within each add-on are ordered
+
+    /// How the streams inside each add-on section are ordered. Best is our ranking (resolution, source
+    /// ladder, size, audio); Size and Seeders let a user override it when they want the biggest file or
+    /// the healthiest torrent specifically. Kept per-add-on so the grouping the user filters by survives.
+    enum SourceSort: String, CaseIterable, Identifiable {
+        case best = "Best", size = "Size", seeders = "Seeders"
+        var id: String { rawValue }
+    }
+
+    /// The streams of `group`, reordered by the active sort. Best leaves the engine ranking intact;
+    /// Size and Seeders sort descending with unknown values sinking to the bottom (sizeForSort 0,
+    /// seedersForSort -1), so direct/debrid links don't outrank real torrents in a Seeders sort.
+    private func sortedStreams(_ group: CoreStreamSourceGroup) -> [CoreStream] {
+        switch sortMode {
+        case .best:    return group.streams
+        case .size:    return group.streams.sorted { StreamRanking.sizeForSort($0) > StreamRanking.sizeForSort($1) }
+        case .seeders: return group.streams.sorted { StreamRanking.seedersForSort($0) > StreamRanking.seedersForSort($1) }
+        }
+    }
 
     private var streamCount: Int { groups.reduce(0) { $0 + $1.streams.count } }
     // Still loading unless every add-on answered — OR the settle timeout fired, which flips a hung
@@ -1479,6 +1534,7 @@ struct iOSSourceList: View {
                 // hidden — otherwise the movie rail would be empty, since the toggle lives in that bar.
                 if showAllSources || !showsPrimaryControls {
                     if groups.count > 1 { filterBar }
+                    sortBar
                     groupedList
                     unresolvedFooter
                 }
@@ -1553,6 +1609,28 @@ struct iOSSourceList: View {
         }
     }
 
+    // MARK: Sort control (Best · Size · Seeders)
+
+    /// A compact segmented control to reorder the rows inside every add-on section. Best is our ranking;
+    /// Size and Seeders are the two objective overrides a user reaches for (biggest file, healthiest
+    /// torrent). Only shown once at least two sources exist, since a single row has nothing to sort.
+    @ViewBuilder private var sortBar: some View {
+        if streamCount > 1 {
+            HStack(spacing: Theme.Space.sm) {
+                Text("Sort")
+                    .font(Theme.Typography.label)
+                    .foregroundStyle(Theme.Palette.textTertiary)
+                Picker("Sort sources", selection: $sortMode) {
+                    ForEach(SourceSort.allCases) { mode in Text(mode.rawValue).tag(mode) }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, Theme.Space.xs)
+        }
+    }
+
     // MARK: Grouped, collapsible streams
 
     /// One collapsible section per add-on. LazyVStack so only on-screen rows are built — a popular
@@ -1562,7 +1640,7 @@ struct iOSSourceList: View {
             ForEach(visibleGroups) { group in
                 Section {
                     if !collapsed.contains(group.addon) {
-                        ForEach(Array(group.streams.enumerated()), id: \.offset) { _, stream in
+                        ForEach(Array(sortedStreams(group).enumerated()), id: \.offset) { _, stream in
                             streamRow(group.addon, stream)
                         }
                     }

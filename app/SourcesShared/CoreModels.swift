@@ -260,6 +260,15 @@ struct CoreMetaItem: Decodable {
         (links ?? []).first { $0.category.caseInsensitiveCompare("imdb") == .orderedSame }?.name
     }
 
+    /// Credits, read from `links` where the engine serializes them as named link categories (each name
+    /// is one person). Accept singular and plural spellings, since add-ons differ. Empty when absent.
+    var cast: [String] { credits("cast", "actors", "actor") }
+    var directors: [String] { credits("director", "directors") }
+    var writers: [String] { credits("writer", "writers") }
+    private func credits(_ categories: String...) -> [String] {
+        (links ?? []).filter { categories.contains($0.category.lowercased()) }.map(\.name)
+    }
+
     /// The first trailer's YouTube id, if the meta carries a playable YouTube trailer. Stremio metas
     /// expose trailers via `trailerStreams` whose source is a YouTube id; some older add-ons only
     /// fill `links` with a "Trailer" category pointing at a youtube.com URL, so fall back to that.

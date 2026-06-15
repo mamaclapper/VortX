@@ -340,6 +340,19 @@ enum StreamRanking {
         return nil
     }
 
+    /// File size in GB for a user-chosen "by size" sort of the source list, folding both spellings an
+    /// add-on uses ("12.4 GB" or "850 MB"); 0 when no size is advertised, so unknown-size streams sink
+    /// to the bottom of a size sort instead of floating to the top.
+    static func sizeForSort(_ s: CoreStream) -> Double {
+        let text = qualityText(s)
+        let gb = sizeGB(text)
+        return gb > 0 ? gb : sizeMB(text) / 1024
+    }
+
+    /// Seeder count for a user-chosen "by seeders" sort; -1 when none is advertised (debrid / direct
+    /// streams never print one), so health-sorting keeps real torrents above link-only sources.
+    static func seedersForSort(_ s: CoreStream) -> Int { seederCount(qualityText(s)) ?? -1 }
+
     /// Classify a stream into the four source categories used for user-rankable tier scoring.
     /// The tag grammar below is verified against the formatter source of the four major
     /// stream add-ons; missing a form here drops a debrid stream into the DIRECT tier
