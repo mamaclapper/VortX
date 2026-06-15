@@ -669,9 +669,21 @@ struct TVPlayerView: View {
             .font(.system(size: big ? 38 : 26, weight: .semibold))
             .foregroundStyle(sel ? Theme.Palette.canvas : Theme.Palette.textPrimary)
             .frame(width: d, height: d)
-            .background(Circle().fill(sel ? Theme.Palette.accent : Theme.Palette.textPrimary.opacity(0.12)))
+            .background { ctrlButtonBackground(sel) }
             .scaleEffect(sel ? 1.12 : 1.0)
             .animation(.easeOut(duration: 0.18), value: sel)
+    }
+
+    /// Focused button keeps our accent fill (the brand highlight); the resting state uses Liquid Glass on
+    /// tvOS 26+, falling back to the flat translucent fill on older tvOS.
+    @ViewBuilder private func ctrlButtonBackground(_ selected: Bool) -> some View {
+        if selected {
+            Circle().fill(Theme.Palette.accent)
+        } else if #available(tvOS 26.0, *) {
+            Circle().fill(.clear).glassEffect(.regular, in: Circle())
+        } else {
+            Circle().fill(Theme.Palette.textPrimary.opacity(0.12))
+        }
     }
 
     // MARK: - Options panel (audio / subtitles / episodes), driven by optionRow
