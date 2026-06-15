@@ -55,6 +55,11 @@ struct PlayerScreen: View {
     // legacy `hasNext` / `onNext`.
     var episodes: [PlayerEpisodeRef] = []
     var loadEpisode: ((String) async -> PlayerEpisodeStream?)? = nil
+    /// Optional background pre-heat for the next episode's source (start a torrent's peer search, pull
+    /// the first bytes of a direct file), called once around the episode's halfway point. Distinct from
+    /// `loadEpisode`: it must NOT touch the engine's meta/player slot (that would hijack the current
+    /// episode's progress), it only warms network I/O. Series detail wires it; nil elsewhere is a no-op.
+    var warmNextEpisode: ((String) async -> Void)? = nil
     var onProgress: (Double, Double) -> Void = { _, _ in }   // periodic forward progress (TimeChanged)
     var onSeek: (Double, Double) -> Void = { _, _ in }       // exact position on user-seek (Seek)
     var onNext: () -> Void = {}                             // advance to the next episode (legacy, non-episode callers)
@@ -167,6 +172,7 @@ struct PlayerScreen: View {
     @State private var sleepTask: Task<Void, Never>?
     @State private var showExternalChooser = false   // "Play in another app" sheet
     @State private var externalLinkDead = false      // pre-flight probe found the stream URL dead before handoff
+    @State private var warmedEpisodeID: String?      // next-episode source already warmed this episode (F6 preload)
     @State private var showShare = false             // system share sheet
     // Current-episode tracking for in-place episode switching: seeded from the launch values, updated on
     // every Next/Prev/list switch so progress, the watched marker, Continue-Watching, skip timestamps,
@@ -455,6 +461,12 @@ struct PlayerScreen: View {
                         lastReported = d
                         onProgress(d, duration)
                     }
+                    // Halfway through a series episode → warm the NEXT episode's source in the
+                    // background (start its torrent's peer search, pull the first bytes of a direct
+                    // file) so auto-advance isn't a cold start. Purely additive: the actual advance
+                    // still resolves through loadEpisode, so progress reporting and engine binding are
+                    // unchanged — this only pre-heats the slow I/O the next open would otherwise pay for.
+                    if !isLive, duration > 60, d / duration >= 0.5 { warmNextIfNeeded() }
                     // ~90% in → flip the engine's watched marker live, so the title leaves Continue
                     // Watching / shows as watched without waiting for EOF (mirrors tvOS:180-183).
                     if !markedWatched, !isLive, duration > 0, d / duration >= 0.9, let m = curMeta {
@@ -985,6 +997,17 @@ struct PlayerScreen: View {
 
     private func goToNextEpisode() { if let i = episodeIndex, i + 1 < episodes.count { goToEpisode(episodes[i + 1].id) } }
     private func goToPrevEpisode() { if let i = episodeIndex, i > 0 { goToEpisode(episodes[i - 1].id) } }
+
+    /// Fire the next-episode warm-up once per episode (F6 preload). Guarded so it runs a single time
+    /// even though the time tick calls it every second past the halfway point, and only when a next
+    /// episode exists and the caller supplied a warm closure.
+    private func warmNextIfNeeded() {
+        guard let warm = warmNextEpisode, canNextEpisode, let i = episodeIndex else { return }
+        let nextID = episodes[i + 1].id
+        guard warmedEpisodeID != nextID else { return }
+        warmedEpisodeID = nextID
+        Task { await warm(nextID) }
+    }
 
     /// Switch to another episode in place: flush the current position, resolve the episode through the
     /// caller, then hot-swap the source and record against the new episode. No cover teardown — the

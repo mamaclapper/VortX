@@ -34,6 +34,21 @@ private func prepareTorrentStream(_ stream: CoreStream) -> Task<Void, Never>? {
     }
 }
 
+/// One add-on's streams for a series episode, fetched straight over the Stremio add-on protocol so the
+/// F6 warm-up never touches the engine's single meta slot (which would evict the playing episode). Mirrors
+/// the tvOS preload's fetchStreams. nil on any failure or an empty answer, so a dead add-on is skipped.
+private func warmFetchEpisodeStreams(base: String, addon: String, id: String) async -> CoreStreamSourceGroup? {
+    let escaped = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+    guard let url = URL(string: "\(base)/stream/series/\(escaped).json") else { return nil }
+    var request = URLRequest(url: url)
+    request.timeoutInterval = 20
+    struct Response: Decodable { let streams: [CoreStream]? }
+    guard let (data, _) = try? await URLSession.shared.data(for: request),
+          let response = try? JSONDecoder().decode(Response.self, from: data),
+          let streams = response.streams, !streams.isEmpty else { return nil }
+    return CoreStreamSourceGroup(id: base, addon: addon, streams: streams)
+}
+
 /// Direct-links-only filter (drop torrent sources) — the free twin of the per-view displayGroups,
 /// shared by the Continue-Watching resume so it ranks the same set the detail page would.
 func iOSDisplayGroups(_ groups: [CoreStreamSourceGroup]) -> [CoreStreamSourceGroup] {
@@ -1162,6 +1177,7 @@ struct iOSEpisodeStreams: View {
                 recordMeta: launch.meta, recordQualityText: launch.qualityText, recordIsTorrent: launch.isTorrent,
                 episodes: seasonEpisodes.map { PlayerEpisodeRef(id: $0.id, label: "E\($0.episodeNumber) · \($0.episodeTitle)") },
                 loadEpisode: { await loadEpisodeStream($0) },
+                warmNextEpisode: { await warmEpisodeStream($0) },
                 onProgress: { pos, dur in core.reportProgress(timeSeconds: pos, durationSeconds: dur); Task { [weak account] in await account?.saveProgress(for: launch.meta, positionSeconds: pos, durationSeconds: dur) } },
                 onSeek: { pos, dur in core.reportProgress(timeSeconds: pos, durationSeconds: dur); Task { [weak account] in await account?.saveProgress(for: launch.meta, positionSeconds: pos, durationSeconds: dur) } },
                 onClose: { player = nil }
@@ -1329,6 +1345,30 @@ struct iOSEpisodeStreams: View {
                               season: v.season, episode: v.episode)
         let title = "\(meta.name)  ·  S\(v.season ?? season)E\(v.episodeNumber)"
         return PlayerEpisodeStream(stream: best, url: url, meta: pm, title: title, resume: await resume(pm))
+    }
+
+    /// F6 preload: warm the next episode's likely source without disturbing the playing episode. Fetch
+    /// its streams directly from every add-on (never `core.loadMeta`, which would evict the current
+    /// episode's slot), rank with the same continuity hint, then start the chosen torrent's peer search
+    /// or pull the first bytes of a direct file. Best-effort and silent; if nothing resolves, the later
+    /// auto-advance simply pays the cold start it would have paid anyway.
+    private func warmEpisodeStream(_ videoId: String) async {
+        guard let v = seasonEpisodes.first(where: { $0.id == videoId }) else { return }
+        let sources = account.streamSources
+        var groups: [CoreStreamSourceGroup] = []
+        await withTaskGroup(of: CoreStreamSourceGroup?.self) { tasks in
+            for s in sources {
+                tasks.addTask { await warmFetchEpisodeStreams(base: s.base, addon: s.name, id: v.id) }
+            }
+            for await g in tasks { if let g { groups.append(g) } }
+        }
+        guard let best = StreamRanking.best(displayGroups(groups), continuity: rememberedQuality, binge: lastBinge) else { return }
+        prepareTorrentStream(best)                       // start peer discovery now (no-op for direct / debrid)
+        guard best.url != nil, let url = best.playableURL else { return }   // direct / debrid → pull first bytes to warm the CDN
+        var request = URLRequest(url: url)
+        request.setValue("bytes=0-8388607", forHTTPHeaderField: "Range")    // first 8 MB
+        request.timeoutInterval = 30
+        _ = try? await URLSession.shared.data(for: request)
     }
 }
 
