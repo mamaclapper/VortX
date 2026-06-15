@@ -10,6 +10,7 @@ struct SettingsView: View {
     @EnvironmentObject private var profiles: ProfileStore
     @State private var serverOnline: Bool?
     @AppStorage("stremiox.forceSDRTonemap") private var forceSDRTonemap = false
+    @AppStorage("stremiox.hdrToneMapMode") private var hdrToneMapMode = "auto"   // auto / on / off
     @State private var showRestartConfirm = false
     @State private var editingProfile: UserProfile?
     @AppStorage(SubtitleStyle.Key.font) private var subFont = SubtitleStyle.defaultFont
@@ -300,12 +301,8 @@ struct SettingsView: View {
             Text("Accent recolors focus, selection, and progress across the app. OLED Black uses true black, best on AMOLED panels.")
                 .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
 
-            Toggle(isOn: $forceSDRTonemap) {
-                Text("Dolby Vision / HDR compatibility").font(Theme.Typography.cardTitle).foregroundStyle(Theme.Palette.textPrimary)
-            }
-            .toggleStyle(.switch)
-            .tint(Theme.Palette.accent)
-            Text("Tone-maps HDR and Dolby Vision to SDR. Turn this on only if 4K Dolby Vision remuxes look washed out, green, or purple on your TV; most TVs should leave it off.")
+            choiceRow("Dolby Vision / HDR", [("auto", "Auto"), ("on", "Tone-map to SDR"), ("off", "Always HDR")], selection: $hdrToneMapMode)
+            Text("Auto tone-maps HDR and Dolby Vision to SDR only on a TV that can't show HDR. Choose Tone-map to SDR if 4K Dolby Vision remuxes look washed out, green or purple on your TV; Always HDR forces pass-through.")
                 .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
 
             stepperRow("App text size", value: theme.textScale,

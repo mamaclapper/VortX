@@ -620,6 +620,19 @@ final class MPVMetalViewController: PlatformViewController {
         syncDisplayDynamicRange(sigPeak: getDouble(MPVProperty.videoParamsSigPeak))
     }
 
+    /// Whether the current display can actually present HDR. Drives the Auto tone-map mode. On tvOS the
+    /// Apple TV switches the connected display into HDR for HDR content itself (HDRDisplayMode below), so
+    /// Auto leaves HDR alone there and only the manual On mode forces SDR.
+    private func displaySupportsHDR() -> Bool {
+        #if os(iOS)
+        return (view.window?.screen.potentialEDRHeadroom ?? 1.0) > 1.0
+        #elseif os(macOS)
+        return (view.window?.screen?.maximumPotentialExtendedDynamicRangeColorComponentValue ?? 1.0) > 1.0
+        #else
+        return true
+        #endif
+    }
+
     private func syncDisplayDynamicRange(sigPeak: Double) {
         guard let handle = mpv else { return }
         let gamma = getString(MPVProperty.videoParamsGamma) ?? ""
@@ -631,12 +644,23 @@ final class MPVMetalViewController: PlatformViewController {
         } else {
             range = .sdr
         }
-        // Dolby Vision / HDR compatibility: when on, render HDR and DV as tone-mapped
-        // SDR instead of switching the display into HDR. Fixes DV Profile 7 dual-layer
-        // remuxes that come out green/purple on setups that mishandle the base layer.
-        if UserDefaults.standard.bool(forKey: "stremiox.forceSDRTonemap"), range != .sdr {
-            DiagnosticsLog.log("mpv", "HDR compatibility on -> tone-mapping \(range.rawValue) to SDR")
-            range = .sdr
+        // Dolby Vision / HDR handling. Auto (default) tone-maps HDR/DV to SDR only when the display can't
+        // actually show HDR (so a non-HDR screen no longer renders HDR washed-out, and a capable screen
+        // still gets real HDR). On always tone-maps (the manual DV Profile 7 green/purple fix); Off never
+        // does. Migrates the old forceSDRTonemap bool: on -> "on", off -> "auto".
+        if range != .sdr {
+            let mode = UserDefaults.standard.string(forKey: "stremiox.hdrToneMapMode")
+                ?? (UserDefaults.standard.bool(forKey: "stremiox.forceSDRTonemap") ? "on" : "auto")
+            let forceSDR: Bool
+            switch mode {
+            case "on":  forceSDR = true
+            case "off": forceSDR = false
+            default:    forceSDR = !displaySupportsHDR()   // auto
+            }
+            if forceSDR {
+                DiagnosticsLog.log("mpv", "HDR tone-map (mode=\(mode)) -> \(range.rawValue) to SDR")
+                range = .sdr
+            }
         }
         guard range != appliedDynamicRange else { return }
         appliedDynamicRange = range

@@ -28,6 +28,7 @@ struct iOSSettingsView: View {
     #endif
 
     @AppStorage("stremiox.forceSDRTonemap") private var forceSDRTonemap = false
+    @AppStorage("stremiox.hdrToneMapMode") private var hdrToneMapMode = "auto"   // auto / on / off
     @AppStorage(SubtitleStyle.Key.font) private var subFont = SubtitleStyle.defaultFont
     @AppStorage(SubtitleStyle.Key.size) private var subSize = SubtitleStyle.defaultSize
     @AppStorage(SubtitleStyle.Key.sizeScale) private var subSizeScale = 1.0
@@ -493,8 +494,11 @@ struct iOSSettingsView: View {
             }
             .pickerStyle(.segmented)
 
-            Toggle("Dolby Vision / HDR compatibility", isOn: $forceSDRTonemap)
-                .tint(Theme.Palette.accent)
+            Picker("Dolby Vision / HDR", selection: $hdrToneMapMode) {
+                Text("Auto").tag("auto")
+                Text("Tone-map to SDR").tag("on")
+                Text("Always HDR").tag("off")
+            }
 
             Stepper(value: $theme.textScale,
                     in: ThemeManager.textScaleRange,
@@ -513,7 +517,7 @@ struct iOSSettingsView: View {
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Accent recolors selection and progress across the app. OLED Black uses true black, best on AMOLED panels.")
-                Text("Dolby Vision / HDR compatibility tone-maps HDR and Dolby Vision to SDR. Turn this on only if 4K Dolby Vision remuxes look washed out, green, or purple; most displays should leave it off.")
+                Text("Auto tone-maps HDR and Dolby Vision to SDR only on a screen that can't show HDR. Choose Tone-map to SDR if 4K Dolby Vision remuxes look washed out, green or purple; Always HDR to force pass-through.")
                 Text("Performance Auto keeps the full experience on capable devices and switches to a lighter one on weaker hardware. Reduced trims animations and shrinks playback buffers. Restart the app after changing this.")
             }
         }
