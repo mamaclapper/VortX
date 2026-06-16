@@ -231,6 +231,16 @@ Reasonable questions for any unsigned build, so here is the straight version:
 
 You sign in with your own account and bring your own add-ons. No content is bundled and no add-ons are bundled. What you watch, and whether it is legal where you live, is on you.
 
+## Built with
+
+- **Swift + SwiftUI**: the entire UI on Apple TV, iPhone, iPad, and Mac, with no web wrapper.
+- **stremio-core**: Stremio's open-source Rust engine (catalogs, add-ons, library, streams), linked as `StremioXCore.xcframework` and driven over a JSON/C bridge.
+- **libmpv via [MPVKit](https://github.com/mpvkit/MPVKit)**: the video player, with HDR and Dolby Vision tonemapping, track selection, and libass subtitles.
+- **nodejs-mobile**: the embedded streaming server (`server.js`) for torrents and the header-gated proxy, in the Full builds.
+- **XcodeGen**: the project is generated from `app/project.yml`, the checked-in source of truth.
+- **GitHub Actions**: builds and publishes the unsigned IPAs and the macOS `.dmg` from source.
+- **Kotlin + Jetpack Compose**: the in-progress Android phone and TV apps (`android/`), on the same shared engine.
+
 ## Building it yourself
 
 You'll need macOS with Xcode, [XcodeGen](https://github.com/yonaskolb/XcodeGen), and Rust nightly with rust-src (the native engine now powers Apple TV, iPhone, iPad, and Mac). MPVKit comes in over Swift Package Manager. No local Stremio install is needed: the fetch script downloads everything it cannot find.
@@ -307,6 +317,12 @@ The Full IPAs include `server.js`, the streaming server's own proprietary file, 
    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=mamaclapper/VortX&type=date&legend=top-left" />
  </picture>
 </a>
+
+## Legal and DMCA
+
+VortX is a client-side app: it browses metadata and plays media that **you** supply through the add-ons you install and the sources you provide. It is intended for content you own or are otherwise authorized to access. VortX does not host, store, index, or distribute any media, and it bundles no content and no add-ons. It is an independent project and is not affiliated with or endorsed by Stremio, Apple, Anthropic, or any add-on or content provider.
+
+Because VortX hosts no content, a copyright complaint about a specific stream belongs with the add-on or server actually hosting it, not with this app. For the full disclaimer, third-party add-on policy, and how to file a copyright notice about this repository, see **[docs/LEGAL.md](docs/LEGAL.md)**.
 
 ## License
 
