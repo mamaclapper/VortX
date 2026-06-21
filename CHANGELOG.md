@@ -14,9 +14,13 @@ What is planned next is in [ROADMAP.md](ROADMAP.md). To request a feature or rep
 
 - **Ratings now come from VortX, no key needed.** Posters and the detail page show IMDb, Rotten Tomatoes, and Metacritic from VortX's own ratings service, so you no longer need your own MDBList key. The rating is baked onto your posters out of the box (on by default); you can still point at your own instance or turn it off in Settings.
 
+- **Smarter recommendations.** "More like this" now ranks by how many genres a title actually shares with what you are viewing (and keeps same-series entries on top) instead of by raw popularity, so the suggestions are genuinely related rather than just whatever is most popular in the genre. "Top Picks for you" now mixes across the different shows you have been watching rather than piling up look-alikes of the most recent one.
+
 ### Fixed
 
 - **Live TV add-ons now show up.** A Live TV add-on (for example MediaFusion) could report online yet leave the Live tab empty, because its channel catalog only loaded if you had scrolled the Home screen far enough first. The Live tab now pulls in every installed add-on's channels directly, so they appear as soon as you open it.
+
+- **The whole interface is localized now, not just Settings.** The menus (Home, Discover, Search, Library, Live), the screen titles, and the category and genre headers your add-ons provide (Popular, Action, Top Movies, and the rest) are translated across all 64 languages. An add-on category we do not yet have a translation for is shown in its original wording.
 
 ### Web (web.vortx.tv)
 
