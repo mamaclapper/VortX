@@ -12,6 +12,8 @@ What is planned next is in [ROADMAP.md](ROADMAP.md). To request a feature or rep
 
 - **Why a source was picked.** The recommended source now shows a short reason beneath Watch, so it is clear why it was chosen over the rest: that it plays instantly from your debrid cache, and that it is your preferred kind of source. (#16)
 
+- **Ratings now come from VortX, no key needed.** Posters and the detail page show IMDb, Rotten Tomatoes, and Metacritic from VortX's own ratings service, so you no longer need your own MDBList key. The rating is baked onto your posters out of the box (on by default); you can still point at your own instance or turn it off in Settings.
+
 ### Fixed
 
 - **Live TV add-ons now show up.** A Live TV add-on (for example MediaFusion) could report online yet leave the Live tab empty, because its channel catalog only loaded if you had scrolled the Home screen far enough first. The Live tab now pulls in every installed add-on's channels directly, so they appear as soon as you open it.
