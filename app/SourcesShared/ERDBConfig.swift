@@ -13,7 +13,7 @@ enum ERDB {
     static let enabledKey = "stremiox.erdb.enabled"   // absent = on (only takes effect once a token is set)
     static let tokenKey = "stremiox.erdb.token"
     static let baseKey = "stremiox.erdb.baseURL"
-    static let defaultBase = "https://easyratingsdb.com"
+    static let defaultBase = "https://erdb.vortx.tv"
 
     static var token: String {
         (UserDefaults.standard.string(forKey: tokenKey) ?? "").trimmingCharacters(in: .whitespaces)
