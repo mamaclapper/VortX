@@ -10,8 +10,8 @@ import Foundation
 /// passing the real `isDolbyVision` from the launching stream's quality text so DV in an AVPlayer-playable
 /// container (MP4/MOV/M4V) auto-routes to a DV-native AVPlayer surface for true Dolby Vision:
 ///   - iOS:   `PlayerScreen.useAVPlayerEngine` -> the full-chrome `AVPlayerEngineView`.
-///   - tvOS:  `RootTabView` -> `TVHLSPlayer` (bare `AVPlayerViewController`).
-///   - macOS: `PlayerScreen` -> `HLSPlayerView`'s `MacVideoPlayer` (SwiftUI `VideoPlayer`).
+///   - tvOS:  `TVPlayerView.playerSurface` -> the full-chrome `AVPlayerEngineView` (same chrome as libmpv).
+///   - macOS: `PlayerScreen` -> the full-chrome `AVPlayerEngineView`.
 /// HLS also routes to AVPlayer on iOS/tvOS (rule 4); macOS keeps HLS on libmpv (its node server transcodes it)
 /// and routes only DV. Torrents and the override are handled before the platform split.
 enum PlayerEngineRouter {

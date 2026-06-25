@@ -1,4 +1,4 @@
-#if os(iOS) || os(macOS)
+#if os(iOS) || os(tvOS) || os(macOS)
 import SwiftUI
 import AVKit
 import AVFoundation
@@ -9,10 +9,10 @@ import AVFoundation
 /// builders (`play`/`live`/`onPropertyChange`/`onTap`) and the same Coordinator, so PlayerScreen can mount
 /// either interchangeably under one overlay.
 ///
-/// iOS + macOS (#46): macOS reuses the whole iOS chrome over this AVPlayer surface for true Dolby Vision and
-/// the "Prefer AVPlayer" override, replacing the old bare-AVKit Mac path. tvOS still uses a bare
-/// AVPlayerViewController (a focusable custom overlay fights the Siri-remote focus engine; its chrome is added
-/// via AVPlayerViewController.customInfoViewControllers instead).
+/// iOS + macOS + tvOS (#46, #76): all three reuse the platform chrome over this AVPlayer surface for true
+/// Dolby Vision and the "Prefer AVPlayer" override. tvOS mounts this from `TVPlayerView.playerSurface` (the
+/// same place it mounts libmpv), so the existing control bar / scrubber / panels drive AVPlayer unchanged;
+/// remote input stays on `TVPlayerView`'s UIKit `RemoteCatcher`, never a focusable SwiftUI overlay.
 struct AVPlayerEngineView: PlatformViewRepresentable {
     @ObservedObject var coordinator: MPVMetalPlayerView.Coordinator
 

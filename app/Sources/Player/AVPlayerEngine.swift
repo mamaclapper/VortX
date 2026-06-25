@@ -1,4 +1,4 @@
-#if os(iOS) || os(macOS)
+#if os(iOS) || os(tvOS) || os(macOS)
 import Foundation
 import AVKit
 import AVFoundation
@@ -13,17 +13,21 @@ import UIKit
 /// HTTP/HLS streams to: libmpv/MoltenVK cannot do true DV passthrough (it tone-maps to SDR), while
 /// AVPlayerLayer is DV/EDR native.
 ///
-/// iOS + macOS (#46): both route Dolby Vision / HLS here under the full PlayerScreen chrome via
-/// `PlayerEngineRouter`, with a fail-soft fallback to libmpv if the AVPlayer item fails to load. tvOS keeps a
-/// bare AVPlayerViewController (a focusable custom overlay fights the Siri-remote focus engine) and adds its
-/// own in-player Episodes + Sources panels through `customInfoViewControllers`.
+/// iOS + macOS + tvOS (#46, #76): all three route Dolby Vision / HLS here under the full player chrome via
+/// `PlayerEngineRouter`, with a fail-soft fallback to libmpv if the AVPlayer item fails to load. tvOS now hosts
+/// this same engine under the existing `TVPlayerView` chrome (the control bar, scrubber, options panels, and
+/// failover are plain SwiftUI over the video surface, driven only through `coordinator.player` and the
+/// `MPVProperty` event bus, so they render over an `AVPlayerLayer` exactly as over libmpv). Remote input still
+/// goes through `TVPlayerView`'s UIKit `RemoteCatcher`, so no focusable SwiftUI overlay competes with the
+/// Siri-remote focus engine.
 ///
 /// This conforms to `PlayerEngine` and emits events; rendering is owned by a sibling AVPlayerLayer host that
-/// calls `attachLayer`, while this object owns playback + state only. Track selection, chapters, subtitle
-/// styling, A/V delay, and trickplay are deliberately STUBBED here: AVFoundation has no 1:1 for several of
-/// them, and the adversarial review said not to build them until a DV stream with multiple tracks is a
-/// proven need, so they are filled in as that need lands. The plain `HLSPlayerView.AVPlayerModel` still
-/// serves the bare iOS/tvOS HLS path that does not need the full chrome.
+/// calls `attachLayer`, while this object owns playback + state only. Embedded track selection (audio +
+/// subtitles via `AVMediaSelectionGroup`), `mediaSummary`, and `playbackStats` are real; chapters load from
+/// asset metadata when present. Subtitle styling, A/V delay, external add-on subtitles, and trickplay frame
+/// capture have no AVFoundation equivalent and stay no-ops, so the chrome hides those rows when this engine is
+/// active. The plain `HLSPlayerView.AVPlayerModel` still serves the bare iOS HLS path that does not need the
+/// full chrome.
 @MainActor
 final class AVPlayerEngineController: NSObject, PlayerEngine {
     let player = AVPlayer()
@@ -47,13 +51,15 @@ final class AVPlayerEngineController: NSObject, PlayerEngine {
     private var subGroup: AVMediaSelectionGroup?
     private var audioTracks: [MPVTrack] = []
     private var subTracks: [MPVTrack] = []
+    // Asset chapter markers, loaded async once the item is ready (empty when the asset carries none).
+    private var loadedChapters: [MPVChapter] = []
 
     // MARK: Loading + transport
 
     func loadFile(_ url: URL, headers: [String: String]?, live: Bool) {
         teardownObservers()
         isReady = false; didStart = false; pendingSeek = nil
-        audioGroup = nil; subGroup = nil; audioTracks = []; subTracks = []
+        audioGroup = nil; subGroup = nil; audioTracks = []; subTracks = []; loadedChapters = []
         // Claim .playback before play so PiP and locked-screen audio work, and advertise multichannel so the
         // system passes through Atmos (#78) and applies AirPods Spatial Audio (#88). Idempotent with the
         // libmpv path since only one engine is live at a time. macOS has no AVAudioSession (the system routes
@@ -140,11 +146,80 @@ final class AVPlayerEngineController: NSObject, PlayerEngine {
     func setAudioDelay(_ seconds: Double) {}
     func applySubtitleStyle() {}
 
-    // MARK: Chapters / media info (STUBBED this step)
+    // MARK: Chapters / media info
 
-    func chapters() -> [MPVChapter] { [] }
-    func mediaSummary() -> (height: Int, audioCodec: String) { (0, "") }
-    func playbackStats() -> [(String, String)] { [] }
+    /// Asset chapter markers, populated async once the item is ready (see `loadChapters`). Empty until then
+    /// and for assets that carry none, so the Chapters panel simply shows nothing.
+    func chapters() -> [MPVChapter] { loadedChapters }
+
+    /// Encoded video height (so the chrome's metadata line can label "4K" / "1080p") and the active audio
+    /// codec name. Height comes from the item's presentation size (its decoded frame dimensions); the codec
+    /// from the selected audible option's media format. Both are best-effort and empty before the item loads.
+    func mediaSummary() -> (height: Int, audioCodec: String) {
+        let height = Int(item?.presentationSize.height ?? 0)
+        return (height, selectedAudioCodec())
+    }
+
+    /// Live playback stats from AVFoundation's access log (the only per-stream telemetry AVPlayer exposes):
+    /// the negotiated + observed bitrates and the indicated resolution. Empty before playback or when the log
+    /// has no events yet.
+    func playbackStats() -> [(String, String)] {
+        guard let event = item?.accessLog()?.events.last else { return [] }
+        var rows: [(String, String)] = []
+        let h = Int(item?.presentationSize.height ?? 0)
+        if h > 0 { rows.append(("Resolution", "\(Int(item?.presentationSize.width ?? 0))×\(h)")) }
+        if event.indicatedBitrate > 0 { rows.append(("Stream bitrate", bitrateString(event.indicatedBitrate))) }
+        if event.observedBitrate > 0 { rows.append(("Observed bitrate", bitrateString(event.observedBitrate))) }
+        if event.numberOfStalls > 0 { rows.append(("Stalls", "\(event.numberOfStalls)")) }
+        return rows
+    }
+
+    private func bitrateString(_ bitsPerSecond: Double) -> String {
+        bitsPerSecond >= 1_000_000
+            ? String(format: "%.1f Mbps", bitsPerSecond / 1_000_000)
+            : String(format: "%.0f kbps", bitsPerSecond / 1_000)
+    }
+
+    /// The codec four-char-code of the selected audible option, lowercased to read like the libmpv codec
+    /// names the metadata line already shows (e.g. "ec-3", "aac"). Empty when nothing is resolvable yet.
+    private func selectedAudioCodec() -> String {
+        guard let item = player.currentItem, let group = audioGroup,
+              let option = item.currentMediaSelection.selectedMediaOption(in: group),
+              let format = option.mediaSubTypes.first else { return "" }
+        // mediaSubTypes is [NSNumber] of FourCharCodes; a FourCharCode is four ASCII bytes (high byte first).
+        let code = format.uint32Value
+        var chars = ""
+        for shift in [24, 16, 8, 0] {
+            let byte = UInt8(truncatingIfNeeded: code >> UInt32(shift))
+            if byte > 32 { chars.append(Character(UnicodeScalar(byte))) }
+        }
+        return chars.lowercased()
+    }
+
+    /// Load asset chapter markers off the main thread, then cache them and re-emit track-list so the chrome
+    /// re-pulls `chapters()`. Cheap (a metadata read), and a no-chapter asset just yields []. Mirrors the
+    /// async pattern of `loadSelectionGroups`.
+    private func loadChapters() {
+        guard let item = player.currentItem else { return }
+        let asset = item.asset
+        Task { @MainActor in
+            let locale = Locale.current
+            let groups = (try? await asset.loadChapterMetadataGroups(
+                bestMatchingPreferredLanguages: locale.language.languageCode.map { [$0.identifier] } ?? [])) ?? []
+            guard player.currentItem === item else { return }   // a newer file loaded meanwhile
+            var chapters: [MPVChapter] = []
+            for group in groups {
+                let start = group.timeRange.start.seconds
+                guard start.isFinite else { continue }
+                let titleItem = group.items.first { $0.commonKey == .commonKeyTitle }
+                let title = (try? await titleItem?.load(.stringValue)) ?? nil
+                chapters.append(MPVChapter(title: title ?? "", start: start))
+            }
+            guard player.currentItem === item else { return }
+            loadedChapters = chapters.sorted { $0.start < $1.start }
+            if !loadedChapters.isEmpty { emit(MPVProperty.trackList, nil) }
+        }
+    }
 
     // MARK: Decode / audio routing (AVFoundation-managed; no-ops on this engine)
 
@@ -213,6 +288,7 @@ final class AVPlayerEngineController: NSObject, PlayerEngine {
             emit(MPVProperty.seekable, seekable)
             emit(MPVProperty.trackList, nil)   // chrome re-pulls via tracks()
             loadSelectionGroups()              // async; re-emits track-list once the groups resolve
+            loadChapters()                     // async; re-emits track-list if the asset has chapter markers
             if let target = pendingSeek, seekable {
                 pendingSeek = nil
                 player.seek(to: CMTime(seconds: max(target, 0), preferredTimescale: 600))

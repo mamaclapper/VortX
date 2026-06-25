@@ -20,9 +20,10 @@ struct PlaybackRequest: Identifiable {
     var bingeGroup: String? = nil
     /// HTTP request headers the stream's add-on requires (behaviorHints.proxyHeaders).
     var headers: [String: String]? = nil
-    /// Force the libmpv player even when the router would pick AVPlayer. Set when an AVPlayer load FAILS
-    /// on tvOS: TVHLSPlayer re-presents the identical stream with this flag so RootView mounts TVPlayerView
-    /// (libmpv) instead of dead-ending on a black AVPlayer screen with no recovery.
+    /// Force the libmpv player even when the router would pick AVPlayer (the last-resort escape hatch).
+    /// TVPlayerView now demotes a failed AVPlayer item to libmpv IN PLACE (`avEngineFailed`), so this is no
+    /// longer needed for the common load failure; it remains for any path that wants to bypass AVPlayer
+    /// routing entirely and mount libmpv directly.
     var forceMPV: Bool = false
 }
 
@@ -34,123 +35,6 @@ final class PlayerPresenter: ObservableObject {
                 request = nil
             }
         }
-    }
-}
-
-/// Native AVPlayer route for an adaptive-HLS stream on tvOS, presented INSTEAD of the libmpv TVPlayerView
-/// so the RemoteCatcher's focus-lock never competes with AVPlayerViewController for the Siri remote. It
-/// reuses the same engine plumbing TVPlayerView uses: it resolves the resume point from the engine (or the
-/// account fallback) before showing the player, and reports progress back so Continue Watching stays in
-/// sync. Leaving is the tvOS Menu press (HLSPlayerView's onExitCommand).
-private struct TVHLSPlayer: View {
-    let request: PlaybackRequest
-    let onClose: () -> Void
-    @EnvironmentObject private var core: CoreBridge
-    @EnvironmentObject private var account: StremioAccount
-    @EnvironmentObject private var presenter: PlayerPresenter
-    @State private var resumeSeconds: Double = 0
-    @State private var ready = false
-    @State private var switching = false
-    @State private var resolveTask: Task<Void, Never>?
-    @State private var sources: [CoreStreamSourceGroup] = []
-    @State private var avFailedFallback = false
-
-    var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            if ready {
-                HLSPlayerView(
-                    url: request.url, title: request.title, headers: request.headers, resumeSeconds: resumeSeconds,
-                    onProgress: { pos, dur in
-                        guard let m = request.meta else { return }
-                        core.reportProgress(timeSeconds: pos, durationSeconds: dur)
-                        Task { [weak account] in await account?.saveProgress(for: m, positionSeconds: pos, durationSeconds: dur) }
-                    },
-                    onClose: onClose,
-                    episodes: request.episodes,
-                    currentVideoId: request.meta?.videoId ?? "",
-                    onSelectEpisode: { switchTo($0) },
-                    sources: sources,
-                    currentSourceSignature: request.sourceHint ?? "",
-                    onSelectSource: { switchSource($0) },
-                    onLoadFailed: { fallbackToMPV() })
-            }
-            if switching {
-                // The current episode keeps playing while the next resolves through the engine; this is just a
-                // hint that the pick registered. Non-focusable + hit-test-off so the bare-player focus
-                // invariant (why this path skips TVPlayerView) is untouched.
-                ProgressView()
-                    .scaleEffect(1.6)
-                    .tint(.white)
-                    .padding(40)
-                    .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 18))
-                    .allowsHitTesting(false)
-            }
-        }
-        .task {
-            if let m = request.meta {
-                if let engine = core.engineResumeSeconds(for: m) { resumeSeconds = engine }
-                else { resumeSeconds = await account.resumeOffset(for: m) }
-                // The engine still holds the playing title's stream groups; rank them (pin-aware) for the
-                // in-player Sources panel. Empty (engine slot moved) just hides the panel. For a series,
-                // filter to THIS episode's stream id so the panel never shows a previous episode's sources
-                // (the engine meta slot can advance); a movie reads the current slot.
-                let pin = SourcePinStore.shared.effectivePin(SourcePinContext(metaId: m.libraryId, isSeries: m.type == "series"))
-                let raw = m.type == "series" ? core.streamGroups(forStreamId: m.videoId) : core.streamGroups()
-                sources = StreamRanking.rankedGroups(raw, pin: pin)
-            }
-            ready = true   // resume resolved (or no meta) -> mount the player so it seeks to the right spot
-        }
-        // Pressing Menu mid-resolve closes the player; cancel an in-flight switch so it never re-presents an
-        // episode into a slot the viewer already left.
-        .onDisappear { resolveTask?.cancel() }
-    }
-
-    /// Switch to another episode from the in-player Episodes panel: resolve its best stream through the
-    /// engine, then re-present. A fresh request id rebuilds the player (`.id(req.id)` in RootView) on the new
-    /// episode — back to this bare AVPlayer for a non-torrent best, or to TVPlayerView for a torrent. The
-    /// current episode keeps playing until the next is resolved, so there is no dead air.
-    private func switchTo(_ v: CoreVideo) {
-        guard !switching, let m = request.meta, v.id != m.videoId else { return }
-        switching = true
-        resolveTask = Task { @MainActor in
-            defer { switching = false }
-            let next = await tvResolveEpisodeRequest(
-                video: v, in: request.episodes, seriesId: m.libraryId, seriesName: m.name,
-                fallbackPoster: m.poster, continuity: request.sourceHint, binge: request.bingeGroup,
-                core: core, account: account)
-            // Menu-press during the resolve cancels this task (onDisappear): don't re-present an episode
-            // into a player the viewer already closed.
-            guard !Task.isCancelled else { return }
-            if let next { presenter.request = next }
-        }
-    }
-
-    /// Switch the playing source from the in-player Sources panel. The chosen stream is already resolved (its
-    /// URL is in the loaded group), so this just re-presents on it — no engine wait. RootView re-routes (a
-    /// non-torrent source stays in this bare AVPlayer, a torrent lands in TVPlayerView); the new player's
-    /// resume picks up where playback was (progress is saved every second).
-    private func switchSource(_ s: CoreStream) {
-        guard let url = s.playableURL, url != request.url, let m = request.meta else { return }
-        core.loadEnginePlayer(for: s)
-        tvPrimeTorrentStream(s)   // no-op for direct / debrid; primes a torrent before TVPlayerView opens it
-        presenter.request = PlaybackRequest(
-            url: url, title: request.title, meta: m, episodes: request.episodes,
-            sourceHint: StreamRanking.signature(s), torrent: s.isTorrent,
-            bingeGroup: s.behaviorHints?.bingeGroup, headers: s.requestHeaders)
-    }
-
-    /// AVPlayer could not open this stream (item status `.failed`). Re-present the IDENTICAL request on
-    /// libmpv by setting `forceMPV`, so RootView mounts TVPlayerView instead of leaving a black AVPlayer
-    /// screen with no recovery. libmpv plays remote HLS and progressive / DV-in-MP4 alike, so this is a
-    /// guaranteed backstop for any stream the router optimistically sent to AVPlayer. Fires once per request.
-    private func fallbackToMPV() {
-        guard !avFailedFallback else { return }
-        avFailedFallback = true
-        presenter.request = PlaybackRequest(
-            url: request.url, title: request.title, meta: request.meta, episodes: request.episodes,
-            sourceHint: request.sourceHint, torrent: request.torrent, bingeGroup: request.bingeGroup,
-            headers: request.headers, forceMPV: true)
     }
 }
 
@@ -180,22 +64,18 @@ struct RootView: View {
                 .opacity(shellVisible ? 1 : 0)
                 .disabled(!shellVisible)
             if let req = presenter.request {
-                if !req.torrent, !req.forceMPV,
-                   PlayerEngineRouter.engine(for: req.url, isTorrent: req.torrent,
-                                             isDolbyVision: StreamRanking.isDolbyVision(req.sourceHint ?? "")) == .avfoundation {
-                    // AVPlayer-routed: adaptive HLS (true ABR vs libmpv locking one rendition) OR a Dolby
-                    // Vision stream in an MP4/MOV container (true DV passthrough on a DV TV; libmpv/MoltenVK
-                    // only tone-maps DV to SDR). Plays in the bare AVPlayerViewController, BYPASSING
-                    // TVPlayerView so the RemoteCatcher's focus-lock never fights AVKit for the Siri remote.
-                    TVHLSPlayer(request: req, onClose: { presenter.request = nil })
-                        .id(req.id)
-                } else {
-                    TVPlayerView(url: req.url, title: req.title, meta: req.meta, episodes: req.episodes,
-                                 sourceHint: req.sourceHint, torrent: req.torrent, bingeGroup: req.bingeGroup,
-                                 headers: req.headers,
-                                 onClose: { presenter.request = nil })
-                        .id(req.id)   // clean player teardown per request
-                }
+                // #76: AVPlayer is now FIRST-CLASS under the full TVPlayerView chrome. Every request goes to
+                // TVPlayerView, which picks the engine per stream in `playerSurface` (AVPlayer for HLS / Dolby
+                // Vision in an AVPlayer-playable container, libmpv for torrents / MKV / everything else) and
+                // demotes AVPlayer to libmpv in place on a load failure. The chrome (control bar, scrubber,
+                // panels, failover) renders identically over either engine, and remote input always stays on
+                // the UIKit RemoteCatcher, so AVKit never fights the Siri-remote focus engine. `forceMPV` (the
+                // last-resort escape hatch) just means TVPlayerView mounts libmpv directly.
+                TVPlayerView(url: req.url, title: req.title, meta: req.meta, episodes: req.episodes,
+                             sourceHint: req.sourceHint, torrent: req.torrent, bingeGroup: req.bingeGroup,
+                             headers: req.headers, forceMPV: req.forceMPV,
+                             onClose: { presenter.request = nil })
+                    .id(req.id)   // clean player teardown per request
             }
             // The launch splash sits above everything for its ~2 seconds. It has no
             // focusable content, so the focus engine settles on the shell underneath

@@ -368,6 +368,8 @@ struct iOSSettingsView: View {
             Picker("Player engine", selection: $playerEngine) {
                 ForEach(PlayerEngineRouter.Override.allCases, id: \.rawValue) { Text($0.label).tag($0.rawValue) }
             }
+            Text("Auto plays HLS and Dolby Vision through AVPlayer (AirPlay and Picture in Picture) and uses the built-in libmpv player for torrents, MKV, and anything AVPlayer cannot open. If a stream will not start, choose Always libmpv.")
+                .font(.caption).foregroundStyle(.secondary)
             #endif
             Picker("Skip step", selection: $seekStep) {
                 ForEach(["10", "15", "30"], id: \.self) { Text("\($0)s").tag($0) }

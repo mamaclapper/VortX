@@ -15,6 +15,7 @@ struct TVPlayerView: View {
     var torrent: Bool = false                  // stream rides the embedded torrent engine (gets warm-up patience)
     var bingeGroup: String? = nil              // the launching stream's release-group tag, for sticky auto-next
     var headers: [String: String]? = nil       // HTTP headers the stream's add-on requires (proxyHeaders)
+    var forceMPV: Bool = false                 // last-resort escape hatch: skip AVPlayer routing, mount libmpv directly
     var onClose: () -> Void = {}           // dismiss the dedicated player window
 
     /// The pinned source for this title (#15), so in-player failover, auto-next, and preload keep using the
@@ -82,6 +83,10 @@ struct TVPlayerView: View {
     @State private var loadFailed = false              // playback couldn't start
     @State private var loadErrorMsg = ""
     @State private var hasStartedPlaying = false
+    // #76: AVPlayer could not open this stream (item status .failed); fell back to libmpv for it in place.
+    // Flipping this re-renders `playerSurface` from AVPlayer to the mpv surface on the SAME TVPlayerView,
+    // so the heavyweight forceMPV window rebuild is no longer needed for the common AVPlayer load failure.
+    @State private var avEngineFailed = false
     @State private var loadTimeout: Task<Void, Never>?
     @State private var autoRetryCount = 0              // bounded auto-recovery attempts before the error overlay
     @State private var reconnecting = false            // showing the "Reconnecting…" auto-retry state
@@ -165,75 +170,7 @@ struct TVPlayerView: View {
         ZStack(alignment: .bottom) {
             Color.black.ignoresSafeArea()
 
-            MPVMetalPlayerView(coordinator: coordinator)
-                .play(initialPlayback.url, headers: initialPlayback.headers)
-                .live(initialLiveMode)
-                .onPropertyChange { _, name, data in
-                    switch name {
-                    case MPVProperty.pausedForCache: if let b = data as? Bool { buffering = b }
-                    case MPVProperty.pause:
-                        if let b = data as? Bool {
-                            isPaused = b
-                            UIApplication.shared.isIdleTimerDisabled = !b   // hold the TV awake while playing; let it sleep when paused
-                            if b { saveProgress(at: currentTime) }   // persist on pause
-                        }
-                    case MPVProperty.timePos:
-                        if let d = data as? Double {
-                            if d > 0, !hasStartedPlaying {            // playback actually began
-                                hasStartedPlaying = true; loadTimeout?.cancel(); recoveryDeadline?.cancel(); recoveryDeadline = nil; loadFailed = false
-                                autoRetryCount = 0; reconnecting = false; autoRetryTask?.cancel()   // playback started: clear auto-recovery
-                                // Live has no resumable position, so don't seed Continue-Watching direct-resume
-                                // for it (mirrors PlayerScreen.recordLastStream's live guard).
-                                if !isCurrentLiveStream, let m = curMeta, let u = curURL {   // remember the working link for direct resume
-                                    LastStreamStore.record(libraryId: m.libraryId, entry: .init(
-                                        videoId: m.videoId, url: u.absoluteString, title: curTitle,
-                                        season: m.season, episode: m.episode, name: m.name,
-                                        poster: m.poster, type: m.type, qualityText: curHint,
-                                        torrent: curIsTorrent, savedAt: Date(), headers: curHeaders),
-                                        profileID: ProfileStore.shared.activeID)
-                                }
-                            }
-                            currentTime = d
-                            updateCurrentSkip(at: d)
-                            maybeCaptureLocalTrickplay(at: d)
-                            // Live: no progress is persisted (saveProgress no-ops) and nothing is reported
-                            // to the engine — a live stream has no meaningful watch position.
-                            if !isCurrentLiveStream, lastSaved < 0 || abs(d - lastSaved) >= 20 {   // persist ~every 20s
-                                lastSaved = d
-                                saveProgress(at: d)
-                                core.reportProgress(timeSeconds: d, durationSeconds: duration)   // live -> engine
-                            }
-                            if !markedWatched, duration > 0, d / duration >= 0.9, let m = curMeta {
-                                markedWatched = true            // ~90% in → flip the watched marker live
-                                core.markPlaybackWatched(m)
-                            }
-                            if duration > 0, d / duration >= 0.5 { preloadNextIfNeeded() }   // halfway → ready the next episode
-                            if duration > 0, duration - d <= 100 { warmNextIfReady() }       // near the end → wake the provider
-                        }
-                    case MPVProperty.videoParamsSigPeak:
-                        if let p = data as? Double { isHDR = p > 1.0; metadataLine = computeMetadataLine() }
-                    case MPVProperty.duration:
-                        if let d = data as? Double { duration = d; maybeResume(); refreshSkipSegments(); fetchSkipTimestamps(); fetchAddonSubtitles() }
-                    case MPVProperty.trackList:
-                        refreshTracks()
-                        let s = coordinator.player?.mediaSummary()
-                        videoHeight = s?.height ?? 0; audioCodec = s?.audioCodec ?? ""
-                        metadataLine = computeMetadataLine()
-                        if !appliedAutoTracks, !(audioTracks.isEmpty && subtitleTracks.isEmpty) {
-                            appliedAutoTracks = true
-                            autoSelectTracks()
-                        }
-                    case MPVProperty.endFileError:
-                        loadTimeout?.cancel()
-                        if !hasStartedPlaying { handleLoadFailure((data as? String) ?? "") }
-                    case MPVProperty.endFileEof:
-                        if handleLiveStreamEOF() { break }
-                        if !markedWatched, let m = curMeta { markedWatched = true; core.markPlaybackWatched(m) }
-                        autoAdvance()                                // episode finished → play next, else exit
-                    default: break
-                    }
-                }
-                .ignoresSafeArea()
+            playerSurface
 
             // UIKit owns ALL remote input. Presented in a dedicated key window so the focus engine has no
             // competitor and every press falls through to here. Swipes come via the pan recognizer.
@@ -324,6 +261,127 @@ struct TVPlayerView: View {
             // preventing any leak (an app the system kills while suspended takes the server, and every
             // engine with it, down too). In-session leaks are covered by the switch / advance / exit paths.
             UIApplication.shared.isIdleTimerDisabled = false   // let the screensaver resume once the player closes
+        }
+    }
+
+    // MARK: - Video surface (engine-routed under the same chrome)
+
+    /// Whether to mount the AVFoundation engine instead of libmpv for this stream (#76). Routes on the RAW
+    /// (un-proxied) launch URL: torrents and loopback URLs always stay on libmpv (the router enforces this),
+    /// and Dolby Vision in an AVPlayer-playable container / remote HLS auto-routes to AVPlayer for true DV
+    /// passthrough, AirPlay, and Picture in Picture. On an AVPlayer load failure we fall back to libmpv for
+    /// this stream (`avEngineFailed`). The DV flag comes from the launching stream's quality text (`sourceHint`).
+    private var useAVPlayerEngine: Bool {
+        if forceMPV || avEngineFailed { return false }   // escape hatch / an AVPlayer load failure fell back to libmpv
+        let loopback = url.host == "127.0.0.1" || url.host == "localhost"
+        let isDV = StreamRanking.isDolbyVision(sourceHint ?? "")
+        return PlayerEngineRouter.engine(for: url, isTorrent: torrent || loopback, isDolbyVision: isDV) == .avfoundation
+    }
+
+    /// The video surface: the AVFoundation engine when routed there, otherwise libmpv. Both bind to the same
+    /// Coordinator and feed the same `handleProperty`, so the surrounding chrome drives either unchanged. This
+    /// mirrors `PlayerScreen.playerSurface` on iOS / macOS.
+    @ViewBuilder private var playerSurface: some View {
+        if useAVPlayerEngine {
+            AVPlayerEngineView(coordinator: coordinator)
+                .play(initialPlayback.url, headers: initialPlayback.headers)
+                .live(initialLiveMode)
+                .onPropertyChange { _, name, data in handleProperty(name, data) }
+                .ignoresSafeArea()
+        } else {
+            MPVMetalPlayerView(coordinator: coordinator)
+                .play(initialPlayback.url, headers: initialPlayback.headers)
+                .live(initialLiveMode)
+                .onPropertyChange { _, name, data in handleProperty(name, data) }
+                .ignoresSafeArea()
+        }
+    }
+
+    /// Whether the active player engine is AVFoundation (so the chrome can hide the rows AVPlayer has no
+    /// equivalent for: external add-on subtitles, trickplay frame capture).
+    private var isAVPlayerActive: Bool { coordinator.player is AVPlayerEngineController }
+
+    // MARK: - Property handling (shared by both engines via the MPVProperty event bus)
+
+    private func handleProperty(_ name: String, _ data: Any?) {
+        switch name {
+        case MPVProperty.pausedForCache: if let b = data as? Bool { buffering = b }
+        case MPVProperty.pause:
+            if let b = data as? Bool {
+                isPaused = b
+                UIApplication.shared.isIdleTimerDisabled = !b   // hold the TV awake while playing; let it sleep when paused
+                if b { saveProgress(at: currentTime) }   // persist on pause
+            }
+        case MPVProperty.timePos:
+            if let d = data as? Double {
+                if d > 0, !hasStartedPlaying {            // playback actually began
+                    hasStartedPlaying = true; loadTimeout?.cancel(); recoveryDeadline?.cancel(); recoveryDeadline = nil; loadFailed = false
+                    autoRetryCount = 0; reconnecting = false; autoRetryTask?.cancel()   // playback started: clear auto-recovery
+                    // Live has no resumable position, so don't seed Continue-Watching direct-resume
+                    // for it (mirrors PlayerScreen.recordLastStream's live guard).
+                    if !isCurrentLiveStream, let m = curMeta, let u = curURL {   // remember the working link for direct resume
+                        LastStreamStore.record(libraryId: m.libraryId, entry: .init(
+                            videoId: m.videoId, url: u.absoluteString, title: curTitle,
+                            season: m.season, episode: m.episode, name: m.name,
+                            poster: m.poster, type: m.type, qualityText: curHint,
+                            torrent: curIsTorrent, savedAt: Date(), headers: curHeaders),
+                            profileID: ProfileStore.shared.activeID)
+                    }
+                }
+                currentTime = d
+                updateCurrentSkip(at: d)
+                maybeCaptureLocalTrickplay(at: d)
+                // Live: no progress is persisted (saveProgress no-ops) and nothing is reported
+                // to the engine — a live stream has no meaningful watch position.
+                if !isCurrentLiveStream, lastSaved < 0 || abs(d - lastSaved) >= 20 {   // persist ~every 20s
+                    lastSaved = d
+                    saveProgress(at: d)
+                    core.reportProgress(timeSeconds: d, durationSeconds: duration)   // live -> engine
+                }
+                if !markedWatched, duration > 0, d / duration >= 0.9, let m = curMeta {
+                    markedWatched = true            // ~90% in → flip the watched marker live
+                    core.markPlaybackWatched(m)
+                }
+                if duration > 0, d / duration >= 0.5 { preloadNextIfNeeded() }   // halfway → ready the next episode
+                if duration > 0, duration - d <= 100 { warmNextIfReady() }       // near the end → wake the provider
+            }
+        case MPVProperty.videoParamsSigPeak:
+            if let p = data as? Double { isHDR = p > 1.0; metadataLine = computeMetadataLine() }
+        case MPVProperty.duration:
+            if let d = data as? Double { duration = d; maybeResume(); refreshSkipSegments(); fetchSkipTimestamps(); fetchAddonSubtitles() }
+        case MPVProperty.trackList:
+            refreshTracks()
+            let s = coordinator.player?.mediaSummary()
+            videoHeight = s?.height ?? 0; audioCodec = s?.audioCodec ?? ""
+            metadataLine = computeMetadataLine()
+            if !appliedAutoTracks, !(audioTracks.isEmpty && subtitleTracks.isEmpty) {
+                appliedAutoTracks = true
+                autoSelectTracks()
+            }
+        case MPVProperty.endFileError:
+            loadTimeout?.cancel()
+            if !hasStartedPlaying {
+                // #76: an AVPlayer item failure before playback started (e.g. a Profile 7 DV remux or a
+                // Matroska AVFoundation cannot demux) demotes to libmpv IN PLACE: flipping `avEngineFailed`
+                // re-renders `playerSurface` to the mpv surface on the SAME view, which re-loads the stream.
+                // This is the true last resort the owner asked for, replacing the heavyweight forceMPV window
+                // rebuild for the common case. Genuine mpv failures fall through to the existing recovery.
+                if useAVPlayerEngine, isAVPlayerActive {
+                    // Tear the AVPlayer engine down NOW (cancels its periodic time observer + KVO) before
+                    // flipping the flag, so no stray timePos tick can land in the surface-swap window and set
+                    // hasStartedPlaying, which would suppress a later genuine libmpv failure. SwiftUI's
+                    // dismantleUIView also calls stop(); it is idempotent, so the double-stop is safe.
+                    coordinator.player?.stop()
+                    avEngineFailed = true
+                    return
+                }
+                handleLoadFailure((data as? String) ?? "")
+            }
+        case MPVProperty.endFileEof:
+            if handleLiveStreamEOF() { break }
+            if !markedWatched, let m = curMeta { markedWatched = true; core.markPlaybackWatched(m) }
+            autoAdvance()                                // episode finished → play next, else exit
+        default: break
         }
     }
 
@@ -745,8 +803,9 @@ struct TVPlayerView: View {
             }]
             rows += groupedTrackRows(subtitleTracks) { coordinator.player?.setSubtitleTrack($0); refreshTracksSoon() }
             // External subtitles from the account's subtitle add-ons. Picking one sub-adds it
-            // into mpv and it joins the embedded list above; its add-on row disappears.
-            let available = addonSubs.filter { !addedSubURLs.contains($0.url) }
+            // into mpv and it joins the embedded list above; its add-on row disappears. Hidden on the
+            // AVPlayer engine, which cannot splice a remote WebVTT in (the row would do nothing).
+            let available = isAVPlayerActive ? [] : addonSubs.filter { !addedSubURLs.contains($0.url) }
             if !available.isEmpty {
                 rows.append(OptionRow(label: "From add-ons", isHeader: true))
                 for sub in available.prefix(30) {
@@ -2105,6 +2164,7 @@ struct TVPlayerView: View {
     }
 
     private func maybeCaptureLocalTrickplay(at time: Double) {
+        guard !isAVPlayerActive else { return }   // AVPlayer has no frame-capture; the scrub bubble stays hidden
         guard !scrubbing, !buffering, !isPaused else { return }
         guard !localTrickplayCaptureInFlight else { return }
         guard time - lastLocalTrickplayCapture >= 10 else { return }
