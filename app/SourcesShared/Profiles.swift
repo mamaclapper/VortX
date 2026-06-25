@@ -607,13 +607,27 @@ final class ProfileStore: ObservableObject {
     }
 
     private func persist(touch: Bool = true) {
-        if let data = try? JSONEncoder().encode(profiles) {
-            UserDefaults.standard.set(data, forKey: Self.listKey)
+        let writeRosterAndActive = {
+            if let data = try? JSONEncoder().encode(self.profiles) {
+                UserDefaults.standard.set(data, forKey: Self.listKey)
+            }
+            UserDefaults.standard.set(self.activeID?.uuidString, forKey: Self.activeKey)
         }
-        UserDefaults.standard.set(activeID?.uuidString, forKey: Self.activeKey)
         if touch {
+            // A genuine local edit: write normally so the global UserDefaults observer arms an auto-push and
+            // this change syncs to the account + other devices.
+            writeRosterAndActive()
             UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.modifiedKey)
             schedulePushRoster()
+        } else {
+            // Routine housekeeping (normalizeOwner re-key, legacy migrations, per-device selection, tombstone
+            // prune, roster merge): explicitly "no push". The writes still hit UserDefaults and would fire the
+            // global didChangeNotification observer in VortXSyncManager, arming hasPendingPush even though this
+            // is not a user edit. Beta 8 added a normalizeOwner re-key on every launch (persist(touch:false)),
+            // which kept hasPendingPush ~always true and starved the receiving device's syncDown guard so peer
+            // settings never applied. Route these writes through the suppression window so they do NOT arm a
+            // push. Genuine edits (touch:true) above are never suppressed, so real toggles still sync.
+            VortXSyncManager.suppressHousekeeping(writeRosterAndActive)
         }
     }
 

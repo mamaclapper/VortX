@@ -24,7 +24,15 @@ final class VortXSyncManager: ObservableObject {
     private let kcAccount = "vortx.sync.session.v1"
     private var token: String?
     private var dataKey: Data?
-    private var lastSyncedVersion = 0   // newest doc version this device has pushed or applied
+    /// Newest doc version this device has pushed or applied. Persisted to UserDefaults (kVersionKey) so the
+    /// version-wins guard stays consistent across relaunches: an in-memory 0 after a cold launch would treat
+    /// the account's current doc as "newer" and re-apply it once on every launch (harmless but wasteful, and
+    /// it re-runs the restore). Seeded from UserDefaults at init.
+    private static let kVersionKey = "vortx.sync.lastSyncedVersion"
+    private var lastSyncedVersion = UserDefaults.standard.integer(forKey: VortXSyncManager.kVersionKey)
+    private func persistLastSyncedVersion() {
+        UserDefaults.standard.set(lastSyncedVersion, forKey: Self.kVersionKey)
+    }
     /// LWW stamp of the last web profileEdits applied. Persisted to UserDefaults so a sign-out / re-login
     /// does not re-window an old dashboard edit (e.g. a delete the app has already honored): an in-memory
     /// 0 after re-login would re-apply a stale profileEdits overlay. Re-apply is idempotent regardless.
@@ -34,6 +42,14 @@ final class VortXSyncManager: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: Self.kEditsAtKey) }
     }
     private var hasPendingPush = false  // a debounced syncUp is queued; don't pull over it
+    /// Set while syncDown is applying a remote pull (the SettingsBackup.restore + apiKeys + overlays +
+    /// tombstones region) and while ProfileStore is doing touch:false launch housekeeping. The global
+    /// UserDefaults.didChangeNotification observer early-returns while this is true, so applying a pull
+    /// (which rewrites every stremiox.* key) no longer self-echoes into requestSyncSoon() — which would
+    /// re-arm hasPendingPush and push the just-applied peer values straight back, starving syncDown's
+    /// guard at line ~471 so a receiving device never applies a peer's settings. A genuine user edit
+    /// (touch:true) is NEVER wrapped in this, so real settings toggles still push and sync.
+    private var isApplyingRemote = false
 
     // MARK: - Real-time sync state (WebSocket + while-active poll)
     /// The live SyncRoom socket; nil whenever disconnected. Receives {"type":"updated","version":N}
@@ -52,8 +68,16 @@ final class VortXSyncManager: ObservableObject {
         restore()
         // Auto-sync: profiles and settings persist to UserDefaults, so one observer catches every change
         // and schedules a debounced push (no-op when signed out). Metadata keys (Keychain) push via ApiKeys.
+        // SUPPRESSION: while isApplyingRemote is true the write came from applying a remote pull or from
+        // routine touch:false launch housekeeping, NOT a user edit, so it must not arm a push. Without this,
+        // the receiving device's syncDown re-arms hasPendingPush (self-echo) and starves its own pull guard,
+        // so peer settings never apply (the Beta 8/9 settings-sync regression). The notification is delivered
+        // on the main queue, so reading the @MainActor flag here is safe.
         NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.requestSyncSoon() }
+            Task { @MainActor in
+                guard let self, !self.isApplyingRemote else { return }
+                self.requestSyncSoon()
+            }
         }
     }
 
@@ -243,7 +267,10 @@ final class VortXSyncManager: ObservableObject {
               let ct = VortXSyncCrypto.seal(key: dataKey, pt) else { return false }
         let version = Int(Date().timeIntervalSince1970 * 1000)
         let (code, _) = await request("PUT", "/v1/backup", body: ["document": ct, "version": version], auth: true)
-        if code == 200 { lastSyncedVersion = max(lastSyncedVersion, version) }
+        if code == 200 {
+            lastSyncedVersion = max(lastSyncedVersion, version)
+            persistLastSyncedVersion()   // survive relaunch so the version guard stays consistent
+        }
         return code == 200
     }
 
@@ -468,11 +495,27 @@ final class VortXSyncManager: ObservableObject {
     @discardableResult
     func syncDown(force: Bool = false) async -> Bool {
         guard isSignedIn else { return false }
-        if !force, hasPendingPush { return false }
         guard let pulled = await pullDocVersioned() else { return false }
+        // VERSION-WINS GUARD. Bail on a version this device already has (the no-op / stale pull); this is also
+        // where hasPendingPush is honored, because a stale pull is exactly what could clobber a queued local
+        // edit. But a STRICTLY NEWER peer version (pulled.version > lastSyncedVersion) is ALWAYS applied, even
+        // while a local push is queued: hasPendingPush exists only to protect a queued local edit from a STALE
+        // pull, not to block a fresh one. The OLD code put `if !force, hasPendingPush { return false }` BEFORE
+        // this check, so on a device with constant pull-time UserDefaults churn (which kept hasPendingPush
+        // ~always true) every WebSocket/poll pull bailed and the peer's newer settings never applied (the
+        // Beta 8/9 regression). The queued local push still fires on its own debounce and syncUp read-merges,
+        // so applying the newer remote first never loses the local edit.
         if !force, pulled.version <= lastSyncedVersion { return false }
         let doc = pulled.doc
         var restored = false
+        // SUPPRESS THE OBSERVER for the whole apply region. SettingsBackup.restore + the apiKeys/overlay/
+        // tombstone/profileEdits writes below all hit UserDefaults; without suppression each fires the
+        // global didChangeNotification observer, which calls requestSyncSoon() -> re-arms hasPendingPush and
+        // schedules a push of the just-applied peer values straight back up (the self-echo). That keeps the
+        // receiving device permanently inside the hasPendingPush window, so its next syncDown bails at the
+        // guard and the peer's settings are never applied. The body is fully synchronous (no awaits), so the
+        // coalesced notifications drain on the next main-queue turn while the flag is still set.
+        withRemoteApplySuppressed {
         if let b64 = doc["settings"] as? String, let data = Data(base64Encoded: b64) {
             // Capture the LIVE roster BEFORE restore: SettingsBackup.restore overwrites the roster key
             // with the cloud blob wholesale, and a cloud blob with FEWER profiles would otherwise delete
@@ -553,7 +596,11 @@ final class VortXSyncManager: ObservableObject {
                 restored = true
             }
         }
+        // Stamp the applied version INSIDE the suppression window: persistLastSyncedVersion writes to
+        // UserDefaults, which would otherwise fire the observer and re-arm a push (another self-echo path).
         lastSyncedVersion = max(lastSyncedVersion, pulled.version)
+        persistLastSyncedVersion()
+        }   // end withRemoteApplySuppressed
         return restored
     }
 
@@ -714,6 +761,35 @@ final class VortXSyncManager: ObservableObject {
             if Task.isCancelled { return }
             await self?.syncUp()
             self?.hasPendingPush = false
+        }
+    }
+
+    /// Run a SYNCHRONOUS block of UserDefaults writes that should NOT arm an auto-push: applying a remote
+    /// pull (the self-echo case) or routine touch:false launch housekeeping. Sets isApplyingRemote for the
+    /// duration AND across the next main-queue turn, because UserDefaults.didChangeNotification is delivered
+    /// asynchronously on the main queue (queue: .main): the notifications generated by the writes are
+    /// coalesced and run AFTER this returns, so the flag must stay set until they drain. Clearing it via a
+    /// trailing DispatchQueue.main.async keeps it true while the queued observer block runs, then clears it.
+    /// Must be called on the main actor with a synchronous body (no awaits inside, or notifications could
+    /// leak past the window).
+    func withRemoteApplySuppressed(_ body: () -> Void) {
+        let wasSuppressing = isApplyingRemote
+        isApplyingRemote = true
+        body()
+        // If we were already inside an outer suppression window, let the outer one clear it.
+        guard !wasSuppressing else { return }
+        DispatchQueue.main.async { [weak self] in self?.isApplyingRemote = false }
+    }
+
+    /// ProfileStore entry point: wrap a touch:false housekeeping persist so its UserDefaults writes do not
+    /// arm a push. Static + main-actor-hopped so the synchronous, possibly-off-main `persist(touch:false)`
+    /// can call it without itself being @MainActor; the actual flag flip + clear happen on the main actor
+    /// where the observer is delivered. touch:true persists are never routed here, so user edits still sync.
+    nonisolated static func suppressHousekeeping(_ writes: @escaping @MainActor () -> Void) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { shared.withRemoteApplySuppressed(writes) }
+        } else {
+            DispatchQueue.main.sync { shared.withRemoteApplySuppressed(writes) }
         }
     }
 
