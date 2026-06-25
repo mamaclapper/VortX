@@ -5,15 +5,7 @@ import UIKit
 /// rail and grid, and the empty / not-signed-in state. See Theme.swift for the tokens these use.
 
 /// Standard poster width across the app. Posters are 2:3, so height is `width * 1.5`.
-/// Still used by the square Live `ChannelTile` (box art), the loading skeletons, and any 2:3 art.
 let kPosterWidth: CGFloat = 200
-
-/// Standard LANDSCAPE catalog-card width on tvOS. Cards are 16:9, so height is `width * 9 / 16`.
-/// Wider than the old 200pt poster so the rails read as cinematic stripes, while the 16:9 height
-/// (~219pt) is shorter than the old poster height (300pt), so each rail row shrinks vertically.
-let kLandscapeCardWidth: CGFloat = 390
-/// 16:9 height for the landscape card width above. One place so rails, grids, and skeletons agree.
-let kLandscapeCardHeight: CGFloat = kLandscapeCardWidth * 9 / 16
 
 /// In-memory poster cache, on top of the shared URLCache (disk). Decoded images, evicted under memory
 /// pressure. Keyed by URL so a poster shown in several rails decodes once.
@@ -67,72 +59,6 @@ struct PosterArt: View {
         } catch {
             if !Task.isCancelled { failed = true }   // a cancel (scrolled away) is not a failure; the next appear retries
         }
-    }
-}
-
-/// Cinematic LANDSCAPE artwork for a catalog card: a 16:9 cell filled with the title's backdrop.
-///
-/// Backdrop sourcing: the caller resolves `backdrop` through `PosterArtwork.backdrop(id:fallback:)`
-/// (rating-baked when ERDB is on, else the add-on backdrop) and passes a `poster` for the graceful
-/// fallback. When no backdrop exists (smaller catalogs ship a poster only), the cell does NOT crop the
-/// 2:3 poster ugly: it fills with a heavily blurred + darkened copy of the poster as a cinematic backing
-/// and lays the poster fit/centered over it, so the 16:9 frame always looks intentional. With neither, a
-/// warm Theme surface placeholder. Same `.task`-driven cached loader as `PosterArt`.
-struct LandscapeArt: View {
-    let backdrop: String?
-    let poster: String?
-    var width: CGFloat = kLandscapeCardWidth
-    @State private var image: UIImage?
-    @State private var usedBackdrop = false
-    @State private var failed = false
-
-    private var height: CGFloat { (width * 9 / 16).rounded() }
-
-    var body: some View {
-        Group {
-            if let image {
-                if usedBackdrop {
-                    // True 16:9 backdrop: fill the cell edge to edge.
-                    Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
-                } else {
-                    // Poster-only fallback: blurred + darkened poster fills the cell, the crisp poster
-                    // sits fit/centered on top, so a 2:3 source never crops into an ugly slab.
-                    Image(uiImage: image).resizable().aspectRatio(contentMode: .fill)
-                        .blur(radius: 26).opacity(0.55)
-                        .overlay(Color.black.opacity(0.35))
-                        .overlay(Image(uiImage: image).resizable().aspectRatio(contentMode: .fit))
-                }
-            } else if failed {
-                Theme.Palette.surface2.overlay(
-                    Image(systemName: "film").font(.system(size: 40)).foregroundStyle(Theme.Palette.textTertiary)
-                )
-            } else {
-                Theme.Palette.surface2.overlay(ProgressView().tint(Theme.Palette.textTertiary))
-            }
-        }
-        .frame(width: width, height: height)
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-        .task(id: "\(backdrop ?? "")|\(poster ?? "")") { await load() }
-    }
-
-    /// Prefer the backdrop (true 16:9); on miss or absence, fall back to the poster (rendered blurred-fill
-    /// behind a fit copy). A cancel (scrolled away) is not a failure, so the next appear retries.
-    private func load() async {
-        image = nil; usedBackdrop = false; failed = false
-        if let img = await fetch(backdrop) { image = img; usedBackdrop = true; return }
-        if let img = await fetch(poster) { image = img; usedBackdrop = false; return }
-        failed = true
-    }
-
-    private func fetch(_ raw: String?) async -> UIImage? {
-        guard let raw, !raw.isEmpty, let url = URL(string: raw) else { return nil }
-        if let cached = posterMemoryCache.object(forKey: url as NSURL) { return cached }
-        var req = URLRequest(url: url)
-        req.cachePolicy = .returnCacheDataElseLoad   // art is immutable: prefer the shared disk cache
-        guard let (data, _) = try? await URLSession.shared.data(for: req), !Task.isCancelled,
-              let img = UIImage(data: data) else { return nil }
-        posterMemoryCache.setObject(img, forKey: url as NSURL)
-        return img
     }
 }
 
@@ -469,14 +395,10 @@ struct BrowseHeroBackdrop: View {
 struct PosterCard: View {
     let title: String
     let poster: String?
-    /// The title's add-on backdrop (16:9). Resolved through `PosterArtwork.backdrop(id:fallback:)` for the
-    /// cinematic landscape art; nil for sparse rails (Continue Watching / Library) where only a poster
-    /// exists, in which case the resolver falls back to the metahub backdrop by id, then the poster.
-    var background: String? = nil
     let type: String
     let id: String
     var progress: Double? = nil
-    var width: CGFloat = kLandscapeCardWidth
+    var width: CGFloat = kPosterWidth
     var menu: PosterMenu = .none
     var onFocus: (() -> Void)? = nil   // browse pages report focus to drive the hero backdrop
     var directPlay: (() -> Void)? = nil   // Continue Watching: resume the same link straight into the player
@@ -507,12 +429,7 @@ struct PosterCard: View {
     private var legacyCardLabel: some View {
         Group {
             VStack(alignment: .leading, spacing: Theme.Space.sm) {
-                // Cinematic 16:9 landscape art: the backdrop (rating-baked when ERDB is on) fills the cell,
-                // with a graceful blurred-poster fallback for backdrop-less catalogs. When the rail item
-                // carries no add-on backdrop (Continue Watching / Library), fall back to the standard
-                // metahub 16:9 backdrop keyed by id before the poster.
-                LandscapeArt(backdrop: PosterArtwork.backdrop(id: id, fallback: background ?? metahubBackground(for: id)),
-                             poster: PosterArtwork.poster(id: id, fallback: poster), width: width)
+                PosterArt(PosterArtwork.poster(id: id, fallback: poster), width: width)
                     .overlay(alignment: .bottom) {
                         if let progress, progress > 0.01 {
                             ProgressStripe(value: progress).padding(Theme.Space.xs)

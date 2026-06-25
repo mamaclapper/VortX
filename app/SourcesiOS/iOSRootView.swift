@@ -1543,9 +1543,8 @@ private struct PosterGrid: View {
     var onReachEnd: (() -> Void)? = nil
     @EnvironmentObject private var theme: ThemeManager   // observe textScale so Theme.Typography repaints live
     // Center the adaptive tracks so the cards distribute evenly across the available width instead of
-    // packing to the leading edge. Min track matches the 210pt landscape card + a little breathing room,
-    // so the grid lays out fewer, wider columns (1 on a phone, more on iPad / Mac) without clipping.
-    private let columns = [GridItem(.adaptive(minimum: 206), spacing: Theme.Space.sm, alignment: .center)]
+    // packing to the leading edge. Min track matches the 120pt card + a little breathing room.
+    private let columns = [GridItem(.adaptive(minimum: 116), spacing: Theme.Space.sm, alignment: .center)]
     var body: some View {
         LazyVGrid(columns: columns, alignment: .center, spacing: Theme.Space.md) {
             ForEach(items) { item in
@@ -1709,16 +1708,13 @@ private let posterMemoryCacheiOS: NSCache<NSURL, PlatformPosterImage> = {
 /// its own frame / crop / clip so the 120x180 fill-crop framing (F37) is unchanged.
 struct CachedPosterImage: View {
     let url: String?
-    /// How the decoded image fills its frame. `.fill` (default) crops to the frame, the existing
-    /// poster behaviour; `.fit` letterboxes (used for the crisp poster laid over a blurred landscape fill).
-    var contentMode: ContentMode = .fill
     @State private var image: PlatformPosterImage?
     @State private var failed = false
 
     var body: some View {
         Group {
             if let image {
-                imageView(image).resizable().aspectRatio(contentMode: contentMode)
+                imageView(image).resizable().scaledToFill()
             } else if failed {
                 Theme.Palette.surface1.overlay(
                     Image(systemName: "film").font(.system(size: 28)).foregroundStyle(Theme.Palette.textTertiary))
@@ -1778,13 +1774,14 @@ private struct PosterCardiOS: View {
     private var card: some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .bottom) {
-                // Cinematic 16:9 landscape art: the backdrop (rating-baked when ERDB is on) fills the cell,
-                // with a graceful blurred-poster fallback for backdrop-less catalogs. No-backdrop items
-                // fall back to the metahub 16:9 backdrop by id before the poster, so a 2:3 source is never
-                // cropped into an ugly slab.
-                LandscapeArtiOS(backdrop: PosterArtwork.backdrop(id: id, fallback: fallbackArt ?? Self.metahubBackground(id)),
-                                poster: PosterArtwork.poster(id: id, fallback: poster),
-                                width: Self.cardWidth)
+                // Cached, self-retrying loader (not raw AsyncImage, which cancels on cell recycle and never
+                // retries, the blank-poster cause). scaledToFill inside CachedPosterImage keeps the source
+                // proportions and CROPS to the card, so non-2:3 add-on posters fill cleanly (F37), and a
+                // missing poster falls back to the title's backdrop before a plain film placeholder.
+                CachedPosterImage(url: PosterArtwork.poster(id: id, fallback: poster ?? fallbackArt))
+                    .frame(width: 120, height: 180)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
                     .overlay(alignment: .topTrailing) {
                         // When a poster service bakes the rating into the image (VortX/XRDB or ERDB), skip
                         // the native overlay to avoid a double badge.
@@ -1809,66 +1806,19 @@ private struct PosterCardiOS: View {
                     .frame(height: 4)
                 }
             }
-            .frame(width: Self.cardWidth, height: Self.cardHeight)
+            .frame(width: 120, height: 180)
             Text(name)
                 .font(Theme.Typography.label)
                 .foregroundStyle(Theme.Palette.textSecondary)
-                .lineLimit(1).frame(width: Self.cardWidth, alignment: .leading)
+                .lineLimit(1).frame(width: 120, alignment: .leading)
         }
-        // One contiguous tap + long-press target over the whole card (art, the 6pt gap, and title).
+        // One contiguous tap + long-press target over the whole card (poster, the 6pt gap, and title).
         // Without it the .buttonStyle(.plain) label hit-tests as the UNION of its subview shapes, so the
         // inter-child gap and rounded-corner regions are dead zones that fall through to the adjacent
         // grid cell — the reported "tap a card in row 1, the row-2 item opens". Rectangle (not the
-        // art's RoundedRectangle) so the title and gap are inside the target and corners aren't dead.
-        .frame(width: Self.cardWidth, alignment: .leading)
+        // poster's RoundedRectangle) so the title and gap are inside the target and corners aren't dead.
+        .frame(width: 120, alignment: .leading)
         .contentShape(Rectangle())
-    }
-
-    /// Landscape 16:9 card metrics (iPhone / iPad / Mac). Sized so ~1.7 cards peek per row on a 390pt
-    /// iPhone. Height is `width * 9 / 16`, shorter than the old 180pt poster, so rails shrink vertically.
-    static let cardWidth: CGFloat = 210
-    static let cardHeight: CGFloat = (cardWidth * 9 / 16).rounded()
-
-    /// The standard Stremio 16:9 backdrop for an IMDb-identified title, used as the landscape fallback
-    /// when a catalog item ships no add-on backdrop (mirrors the tvOS `metahubBackground`).
-    private static func metahubBackground(_ id: String) -> String? {
-        id.hasPrefix("tt") ? "https://images.metahub.space/background/big/\(id)/img" : nil
-    }
-}
-
-/// Cinematic LANDSCAPE artwork for an iOS / Mac catalog card: a 16:9 cell filled with the title's
-/// backdrop, with a graceful blurred-poster fallback when no backdrop exists (so a 2:3 poster is never
-/// cropped into an ugly slab) and a film placeholder as the last resort. Built on the same cached,
-/// self-retrying `CachedPosterImage` loader the posters use, so cells never go permanently blank on
-/// scroll recycle.
-private struct LandscapeArtiOS: View {
-    let backdrop: String?
-    let poster: String?
-    var width: CGFloat = 210
-    private var height: CGFloat { (width * 9 / 16).rounded() }
-
-    var body: some View {
-        Group {
-            if let backdrop, !backdrop.isEmpty {
-                // True 16:9 backdrop: fill the cell edge to edge.
-                CachedPosterImage(url: backdrop)
-            } else if let poster, !poster.isEmpty {
-                // Poster-only fallback: blurred + darkened poster fills the cell, the crisp poster sits
-                // fit/centered on top.
-                ZStack {
-                    CachedPosterImage(url: poster)
-                        .blur(radius: 22).opacity(0.55)
-                        .overlay(Color.black.opacity(0.35))
-                    CachedPosterImage(url: poster, contentMode: .fit)
-                }
-            } else {
-                Theme.Palette.surface1.overlay(
-                    Image(systemName: "film").font(.system(size: 24)).foregroundStyle(Theme.Palette.textTertiary))
-            }
-        }
-        .frame(width: width, height: height)
-        .clipped()
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
     }
 }
 
