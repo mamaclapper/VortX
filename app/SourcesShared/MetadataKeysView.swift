@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Enter optional TMDB and MDBList keys (stored in the Keychain via ApiKeys). Both are optional and
+/// Enter optional TMDB, MDBList, and fanart.tv keys (stored in the Keychain via ApiKeys). All are optional and
 /// only enrich recommendations and ratings; VortX works fully without them. Cross-platform.
 struct MetadataKeysView: View {
     @ObservedObject private var keys = ApiKeys.shared
@@ -9,11 +9,12 @@ struct MetadataKeysView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.lg) {
                 Text("Metadata services").screenTitleStyle()
-                Text("Optional. Add your own TMDB and MDBList keys to enrich recommendations and ratings. Nothing here is required and your keys stay on this device (and sync, encrypted, to your VortX account).")
+                Text("Optional. Add your own TMDB, MDBList, and fanart.tv keys to enrich recommendations, ratings, and artwork. Nothing here is required and your keys stay on this device (and sync, encrypted, to your VortX account).")
                     .font(Theme.Typography.body)
                     .foregroundStyle(Theme.Palette.textSecondary)
                 keyField("TMDB", text: $keys.tmdb, hint: "Free at themoviedb.org, Settings then API.")
                 keyField("MDBList", text: $keys.mdblist, hint: "Free at mdblist.com, Preferences then API.")
+                keyField("fanart.tv", text: $keys.fanart, hint: "Free at fanart.tv, your profile then API.")
             }
             .padding(.horizontal, Theme.Space.screenInset)
             .padding(.vertical, Theme.Space.xl)

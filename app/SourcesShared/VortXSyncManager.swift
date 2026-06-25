@@ -435,6 +435,7 @@ final class VortXSyncManager: ObservableObject {
         var keys = (doc["apiKeys"] as? [String: String]) ?? [:]
         if let t = ApiKeys.tmdbKey() { keys["tmdb"] = t }
         if let m = ApiKeys.mdblistKey() { keys["mdblist"] = m }
+        if let f = ApiKeys.fanartKey() { keys["fanart"] = f }
         // Debrid keys ride the same encrypted apiKeys channel so they follow the account across devices
         // (they live in the Keychain, which SettingsBackup deliberately excludes, so they need this mirror).
         // Set only when configured locally; do NOT remove a key absent locally (another device authored it).
@@ -488,6 +489,7 @@ final class VortXSyncManager: ObservableObject {
         if let keys = doc["apiKeys"] as? [String: String] {
             if let t = keys["tmdb"] { ApiKeys.shared.tmdb = t }
             if let m = keys["mdblist"] { ApiKeys.shared.mdblist = m }
+            if let f = keys["fanart"] { ApiKeys.shared.fanart = f }
             // Debrid keys: apply only when present so a doc without them never clears a locally-entered key.
             let debrid = DebridKeys.shared
             if let v = keys["realDebrid"], v != debrid.key(for: .realDebrid) { debrid.setKey(v, for: .realDebrid) }
