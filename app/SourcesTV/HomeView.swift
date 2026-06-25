@@ -9,6 +9,9 @@ struct HomeView: View {
     @EnvironmentObject private var profiles: ProfileStore
     @StateObject private var focusModel = FocusedItemModel()
     @StateObject private var topPicks = TopPicksModel()   // local recommendations from this profile's history
+    @StateObject private var heroTrailer = HomeHeroTrailerModel()   // #44: focus-settled muted hero trailer
+    @AppStorage("stremiox.autoplayTrailers") private var autoplayTrailers = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// The owner profile rides the account's Continue Watching; overlay profiles ride their own
     /// private synced history.
@@ -30,6 +33,18 @@ struct HomeView: View {
                 // detailsBottom = strip height (470) + a breathing gap, so the synopsis can never
                 // run into the rail header regardless of tab-bar safe-area shifts.
                 BrowseHeroBackdrop(model: focusModel, detailsBottom: 520)
+                    // #44: once focus SETTLES on a catalog item for ~3s, its muted FULL trailer fades in
+                    // behind the hero art (over the still backdrop, under the rails + details). Gated on
+                    // the same autoplay-trailers setting + reduce-motion as the detail hero, and keyed on
+                    // the resolved URL so a focus change (which clears it) tears the libmpv layer down.
+                    // Non-focusable + no hit-testing inside the view, so the focus engine is untouched.
+                    .overlay {
+                        if autoplayTrailers, !reduceMotion, let url = heroTrailer.url {
+                            TVInHeroTrailerView(url: url)
+                                .ignoresSafeArea()
+                                .allowsHitTesting(false)
+                        }
+                    }
                 // The rails live in a bottom strip. The focus engine centers focused rows inside
                 // THIS viewport, so they are geometrically incapable of riding up over the hero.
                 ScrollView {
@@ -70,6 +85,9 @@ struct HomeView: View {
         .onChange(of: core.continueWatching.first?.id) { seed(); refreshTopPicks() }
         .onChange(of: profiles.activeID) { seed(); refreshTopPicks() }
         .onChange(of: core.addons.count) { configureMetaSources() }
+        // Drive the focus-settled hero trailer (#44): every hero change re-arms the 3s debounce and tears
+        // down the current trailer, so scrolling catalog-to-catalog never loads a clip.
+        .onChange(of: focusModel.hero?.id) { heroTrailer.focusChanged(to: focusModel.hero) }
     }
 
     /// Recompute the "Top Picks for you" rail from the profile-aware Continue Watching + library.
@@ -80,8 +98,9 @@ struct HomeView: View {
 
     /// The hero enrichment asks the user's own meta add-ons, so every id scheme resolves.
     private func configureMetaSources() {
-        FocusedItemModel.configureMetaSources(
-            transportUrls: core.addons.filter(\.providesMeta).map(\.transportUrl))
+        let metaUrls = core.addons.filter(\.providesMeta).map(\.transportUrl)
+        FocusedItemModel.configureMetaSources(transportUrls: metaUrls)
+        heroTrailer.configureMetaSources(transportUrls: metaUrls)
     }
 
     /// First render shows the page's actual first item, and Continue Watching pre-fetches its
@@ -100,6 +119,108 @@ struct HomeView: View {
         }
         .padding(.horizontal, Theme.Space.screenEdge)
     }
+}
+
+/// The HOME featured-hero trailer driver (#44): plays the focused catalog item's MUTED FULL trailer behind
+/// the hero art, but only once focus has SETTLED on that item for ~3s. The 3s debounce is the whole point:
+/// scrolling catalog-to-catalog must never fire a ytdl request, so the timer is re-armed on every focus
+/// change and only the item the user actually lands on resolves a trailer. The trailer is torn down the
+/// instant focus moves (the URL clears, which unmounts `TVInHeroTrailerView`), so the embedded server is
+/// hit at most once per settled item, never on every rotation.
+///
+/// On the Lite build (no embedded server) a YouTube-only trailer has no `playableURL`, so this resolves nil
+/// and the still hero art stays — the no-op the owner asked for.
+@MainActor final class HomeHeroTrailerModel: ObservableObject {
+    /// The settled item's resolved trailer URL, or nil while debouncing / when no trailer exists. Mounting
+    /// `TVInHeroTrailerView` on this means clearing it tears the libmpv layer down at once.
+    @Published private(set) var url: URL?
+
+    /// Seconds focus must rest on one item before its trailer loads, so flicking past catalogs never loads.
+    private static let settleDelay: Duration = .seconds(3)
+
+    private var pending: Task<Void, Never>?
+    private var currentItemID: String?
+    /// Base URLs of the user's meta-serving add-ons (set by HomeView via `configureMetaSources`), walked to
+    /// resolve the focused item's meta the same way `FocusedItemModel` enriches the backdrop.
+    private var metaSourceBases: [String] = []
+
+    func configureMetaSources(transportUrls: [String]) {
+        metaSourceBases = transportUrls.map { url in
+            url.hasSuffix("manifest.json") ? String(url.dropLast("manifest.json".count)) : url
+        }
+    }
+
+    /// Focus settled on (or moved to) an item. Tear down any current trailer immediately, then arm the 3s
+    /// settle timer; if focus moves again before it fires the timer is cancelled, so no request is made.
+    /// `hero == nil` (focus left the rails) just tears down.
+    func focusChanged(to hero: FocusedHero?) {
+        guard hero?.id != currentItemID else { return }
+        currentItemID = hero?.id
+        pending?.cancel()
+        // Tear the previous trailer down the moment focus leaves it.
+        if url != nil { url = nil }
+        guard let hero else { return }
+        pending = Task { [weak self] in
+            try? await Task.sleep(for: Self.settleDelay)
+            guard !Task.isCancelled else { return }
+            await self?.resolveTrailer(for: hero)
+        }
+    }
+
+    /// Settled for the full delay: resolve the focused item's trailer to a playable URL (preferring a direct
+    /// stream, else the embedded server's `/yt` redirect) and publish it. Only applies if focus is still on
+    /// this item, so a late network reply for a since-abandoned item never paints.
+    private func resolveTrailer(for hero: FocusedHero) async {
+        guard let request = await fetchTrailer(for: hero), let playable = request.playableURL else { return }
+        guard currentItemID == hero.id, !Task.isCancelled else { return }
+        url = playable
+    }
+
+    /// Walk Cinemeta (for tt ids) + every installed meta add-on for this item's meta, building a
+    /// `TrailerRequest` from the first response that carries a trailer. Mirrors `FocusedItemModel`'s
+    /// enrichment fetch (short timeout, cache-first), so it is cheap and never blocks.
+    private func fetchTrailer(for hero: FocusedHero) async -> TrailerRequest? {
+        var bases = metaSourceBases
+        if hero.id.hasPrefix("tt") { bases.insert("https://v3-cinemeta.strem.io/", at: 0) }
+        let candidates = bases.compactMap { URL(string: "\($0)meta/\(hero.type)/\(hero.id).json") }
+        for url in candidates {
+            var request = URLRequest(url: url)
+            request.timeoutInterval = 6
+            request.cachePolicy = .returnCacheDataElseLoad
+            guard let (data, response) = try? await URLSession.shared.data(for: request),
+                  (response as? HTTPURLResponse)?.statusCode == 200,
+                  let decoded = try? JSONDecoder().decode(TrailerMetaResponse.self, from: data),
+                  let meta = decoded.meta else { continue }
+            if let trailer = meta.trailerRequest(title: hero.title) { return trailer }
+        }
+        return nil
+    }
+}
+
+/// The add-on meta response, narrowed to the trailer fields (parity with `TrailerRequest.from(meta:)` over
+/// the same shape the engine decodes into `CoreMetaItem`).
+private struct TrailerMetaResponse: Decodable {
+    struct Stream: Decodable { let ytId: String?; let url: String? }
+    struct Link: Decodable { let name: String; let category: String; let url: String? }
+    struct Meta: Decodable {
+        let trailerStreams: [Stream]?
+        let links: [Link]?
+
+        /// Build a `TrailerRequest`: prefer a direct (non-YouTube) trailer stream, else a YouTube id from
+        /// `trailerStreams` or a "Trailer" link. Nil when neither exists (so the still art stays).
+        func trailerRequest(title: String) -> TrailerRequest? {
+            let direct = (trailerStreams ?? [])
+                .compactMap { $0.ytId == nil ? $0.url : nil }
+                .compactMap { URL(string: $0) }
+                .first
+            let yt = (trailerStreams ?? []).compactMap(\.ytId).first { !$0.isEmpty }
+                ?? (links ?? []).first { $0.category.caseInsensitiveCompare("Trailer") == .orderedSame }?
+                    .url.flatMap(CoreMetaItem.youTubeID(from:))
+            guard direct != nil || yt != nil else { return nil }
+            return TrailerRequest(title: title, youTubeID: yt, directURL: direct)
+        }
+    }
+    let meta: Meta?
 }
 
 /// Eyebrow kicker + section title, the shared header for every rail.

@@ -491,7 +491,11 @@ struct DetailView: View {
     @ViewBuilder private func heroTrailerLayer(_ m: CoreMetaItem) -> some View {
         if autoplayTrailers, !reduceMotion, !LiveTypes.contains(type),
            let url = TrailerRequest.from(meta: m)?.playableURL {
-            TVInHeroTrailerView(url: url)
+            // Detail = a short SILENT WINDOW (owner's clip-scope answer): start ~10s in and loop an
+            // ~8s snippet, the tvOS parity of the iOS detail's `.clip(startSeconds:windowSeconds:)`.
+            // For a SERIES this `m` is the series meta, so a series-episode hero shows the SERIES
+            // trailer snippet (there is no per-episode trailer).
+            TVInHeroTrailerView(url: url, window: (start: 10, length: 8))
         }
     }
 

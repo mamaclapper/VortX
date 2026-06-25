@@ -9,6 +9,11 @@ import SwiftUI
 /// appears, the same ambient treatment iOS gives. The still art underneath is the permanent fallback, so a
 /// missing / slow / blocked clip never leaves the band black.
 ///
+/// Two loop modes (the owner's clip-scope answer): pass `window` for a short SILENT WINDOW (the DETAIL hero
+/// shows a ~8s snippet, the parity of the iOS detail's `.clip(start:window:)`), or leave it nil for the whole
+/// muted trailer on a built-in `loop-file=inf` loop (the HOME featured hero). The same view serves both so
+/// the home + detail heroes share one decorative libmpv layer.
+///
 /// Gating + fallback (mirrors iOS exactly):
 ///   • The caller gates on the `stremiox.autoplayTrailers` setting + `accessibilityReduceMotion`, and only
 ///     mounts this view when a trailer exists, so reduced-motion / setting-off never starts a clip.
@@ -30,6 +35,12 @@ struct TVInHeroTrailerView: View {
     /// The resolved trailer playable URL ({serverBase}/yt/{id} or a direct stream). The caller guarantees
     /// it is non-nil (so the Lite build, where it is nil, never reaches here).
     let url: URL
+
+    /// When set, play a short SILENT WINDOW instead of the whole trailer: seek to `start` on reveal and
+    /// re-seek back to `start` every time playback passes `start + length`, so the band shows a brief
+    /// ambient snippet that loops. The detail hero uses this (owner: detail = short window). When nil,
+    /// the whole trailer loops via mpv's own `loop-file=inf` (the HOME hero uses that, full muted trailer).
+    var window: (start: Double, length: Double)? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -66,8 +77,11 @@ struct TVInHeroTrailerView: View {
                 // it is a pure cross-fade with no reload.
                 MPVMetalPlayerView(coordinator: coordinator)
                     .play(url)
-                    .muted(true, loop: true)
-                    .onPropertyChange { _, name, data in handleProperty(name, data) }
+                    // Windowed mode does its OWN re-seek loop in the property handler, so it must NOT
+                    // hand mpv `loop-file=inf` (that would replay the whole trailer). Full mode keeps
+                    // mpv's built-in inf loop. Muted either way: a silent ambient clip.
+                    .muted(true, loop: window == nil)
+                    .onPropertyChange { engine, name, data in handleProperty(engine, name, data) }
                     .allowsHitTesting(false)   // ambient: never in the focus / hit path
                     .opacity(showClip ? 1 : 0)
                     .animation(reduceMotion ? nil : .easeOut(duration: Self.fadeDuration), value: showClip)
@@ -110,15 +124,24 @@ struct TVInHeroTrailerView: View {
         .allowsHitTesting(false)
     }
 
-    /// libmpv property bus: reveal the clip once it actually starts, and hide it on a load failure. The
-    /// loop is handled by mpv's own `loop-file=inf`, so EOF never reaches here.
-    private func handleProperty(_ name: String, _ data: Any?) {
+    /// libmpv property bus: reveal the clip once it actually starts, hide it on a load failure, and (in
+    /// windowed mode) re-seek so only a short snippet loops. Full mode lets mpv's own `loop-file=inf`
+    /// handle repetition, so EOF never reaches here.
+    private func handleProperty(_ engine: any PlayerEngine, _ name: String, _ data: Any?) {
         switch name {
         case MPVProperty.timePos:
-            // First decoded time-pos means the clip really started; arm the reveal beat exactly once.
-            guard !didStart else { return }
-            didStart = true
-            armReveal()
+            // First decoded time-pos means the clip really started; seek into the window (if any) and
+            // arm the reveal beat exactly once.
+            if !didStart {
+                didStart = true
+                if let window { engine.seek(to: window.start) }
+                armReveal()
+            }
+            // Windowed mode: keep the snippet looping by re-seeking to the start once playback runs past
+            // the window. A small guard band absorbs the time-pos event granularity so we never thrash.
+            if let window, let pos = data as? Double, pos >= window.start + window.length {
+                engine.seek(to: window.start)
+            }
         case MPVProperty.endFileError:
             // ytdl extraction failed / dead link: hide the clip so the still backdrop shows.
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) { failed = true }
