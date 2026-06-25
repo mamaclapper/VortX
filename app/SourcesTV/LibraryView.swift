@@ -8,7 +8,9 @@ struct LibraryView: View {
     @EnvironmentObject private var account: StremioAccount
     @EnvironmentObject private var profiles: ProfileStore   // gate the Library on the active profile's own history
     @StateObject private var focusModel = FocusedItemModel()
-    private let columns = Array(repeating: GridItem(.fixed(kPosterWidth), spacing: Theme.Space.lg), count: 6)
+    // Landscape 16:9 cells are far wider than the old 2:3 posters, so the grid drops from 6 narrow
+    // columns to 3 wide ones to fit without horizontal clipping.
+    private let columns = Array(repeating: GridItem(.fixed(kLandscapeCardWidth), spacing: Theme.Space.lg), count: 3)
 
     var body: some View {
         NavigationStack {

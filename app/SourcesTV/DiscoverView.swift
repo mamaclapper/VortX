@@ -7,7 +7,9 @@ struct DiscoverView: View {
     @EnvironmentObject private var theme: ThemeManager
     @EnvironmentObject private var account: StremioAccount
     @StateObject private var focusModel = FocusedItemModel()
-    private let columns = Array(repeating: GridItem(.fixed(kPosterWidth), spacing: Theme.Space.lg), count: 6)
+    // Landscape 16:9 cells are far wider than the old 2:3 posters, so the grid drops from 6 narrow
+    // columns to 3 wide ones to fit without horizontal clipping.
+    private let columns = Array(repeating: GridItem(.fixed(kLandscapeCardWidth), spacing: Theme.Space.lg), count: 3)
 
     var body: some View {
         NavigationStack {
@@ -92,7 +94,8 @@ struct DiscoverView: View {
         } else {
             LazyVGrid(columns: columns, spacing: Theme.Space.xl) {
                 ForEach(items) { item in
-                    PosterCard(title: item.name, poster: item.poster, type: item.type, id: item.id,
+                    PosterCard(title: item.name, poster: item.poster, background: item.background,
+                               type: item.type, id: item.id,
                                menu: .catalog,
                                onFocus: { focusModel.focus(item.focusedHero) })
                         // Infinite scroll: load the next catalog page when focus reaches the last card

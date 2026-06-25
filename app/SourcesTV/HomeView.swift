@@ -318,7 +318,8 @@ struct CoreCatalogRowView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: Theme.Space.lg) {
                     ForEach(row.items) { item in
-                        PosterCard(title: item.name, poster: item.poster, type: item.type, id: item.id,
+                        PosterCard(title: item.name, poster: item.poster, background: item.background,
+                                   type: item.type, id: item.id,
                                    menu: .catalog,
                                    onFocus: focusModel.map { model in
                                        { model.focus(item.focusedHero) }
@@ -347,7 +348,10 @@ struct TopPicksRow: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: Theme.Space.lg) {
                     ForEach(items) { item in
-                        PosterCard(title: item.name, poster: item.poster, type: item.type, id: item.id,
+                        // MetaPreview ships no backdrop, so the card resolves the landscape art from the
+                        // metahub backdrop by id with a poster fallback.
+                        PosterCard(title: item.name, poster: item.poster,
+                                   type: item.type, id: item.id,
                                    menu: .catalog,
                                    onFocus: focusModel.map { model in
                                        { model.focus(hero(for: item)) }
@@ -380,7 +384,7 @@ struct LoadingRail: View {
                     ForEach(0..<6, id: \.self) { _ in
                         RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
                             .fill(Theme.Palette.surface1)
-                            .frame(width: kPosterWidth, height: kPosterWidth * 1.5)
+                            .frame(width: kLandscapeCardWidth, height: kLandscapeCardHeight)
                     }
                 }
                 .padding(.horizontal, Theme.Space.screenEdge)

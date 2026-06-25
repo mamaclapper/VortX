@@ -121,6 +121,9 @@ struct DetailView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     LazyHStack(alignment: .top, spacing: Theme.Space.lg) {
                         ForEach(similarItems.prefix(20)) { item in
+                            // MetaPreview ships no backdrop, so the card resolves the landscape art from
+                            // the metahub backdrop by id (these are tt/tmdb recommendations) with a
+                            // poster fallback.
                             PosterCard(title: item.name, poster: item.poster,
                                        type: item.type, id: item.id)
                         }

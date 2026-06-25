@@ -124,7 +124,8 @@ struct SearchView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(alignment: .top, spacing: Theme.Space.lg) {
                     ForEach(items) { item in
-                        PosterCard(title: item.name, poster: item.poster, type: item.type, id: item.id,
+                        PosterCard(title: item.name, poster: item.poster, background: item.background,
+                                   type: item.type, id: item.id,
                                    menu: .catalog)
                             .simultaneousGesture(TapGesture().onEnded { _ in saveToHistory(query) })
                     }
