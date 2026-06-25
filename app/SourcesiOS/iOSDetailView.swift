@@ -2184,6 +2184,11 @@ private struct iOSStreamLabel: View {
 
     private func badge(_ text: String, prominent: Bool = false) -> some View {
         Text(text).font(Theme.Typography.eyebrow).tracking(1)
+            // Keep the badge (including the add-on / debrid / source name) on a single horizontal line at
+            // its intrinsic width. Without fixedSize a sibling badge could squeeze the name pill to a
+            // near-zero width, wrapping the name to 2-3 characters per line (the reported vertical text).
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 10).padding(.vertical, 4)
             .background(prominent ? Theme.Palette.accent.opacity(0.22) : Theme.Palette.surface3, in: Capsule())
             .foregroundStyle(prominent ? Theme.Palette.accent : Theme.Palette.textSecondary)

@@ -760,6 +760,10 @@ struct iOSSettingsView: View {
 
     @ViewBuilder private var appearanceSection: some View {
         Section {
+            // Placed first so the Live TV tab toggle is easy to find at the top of Appearance
+            // (it was previously buried below all the pickers and steppers).
+            Toggle("Show Live TV tab", isOn: Binding(get: { !hideLiveTab }, set: { hideLiveTab = !$0 }))
+
             // ThemeAccentPicker / ThemeBackgroundPicker are tvOS-only (declared in SourcesTV); on
             // iOS we bind native Pickers to the SAME ThemeManager state (accentID, oled).
             Picker("Accent", selection: $theme.accentID) {
@@ -791,8 +795,6 @@ struct iOSSettingsView: View {
                 Text("Reduced").tag("reduced")
             }
             .pickerStyle(.segmented)
-
-            Toggle("Show Live TV tab", isOn: Binding(get: { !hideLiveTab }, set: { hideLiveTab = !$0 }))
         } header: {
             Text("Appearance")
         } footer: {

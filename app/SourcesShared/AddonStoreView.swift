@@ -110,6 +110,9 @@ struct AddonStoreView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.lg) {
                 Text("Discover add-ons").screenTitleStyle()
+                    // A long localized title scales down to fit instead of overflowing / clipping the row.
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.6)
                 hint("Browse the community add-on collection and install with one tap. Each shows whether it is reachable right now. Installed add-ons sync to your account and the official apps.")
                 searchField
                 if catalog.loading && catalog.addons.isEmpty {
@@ -139,6 +142,13 @@ struct AddonStoreView: View {
             .padding(.horizontal, Theme.Space.screenInset)
             .padding(.vertical, Theme.Space.xl)
             .frame(maxWidth: .infinity, alignment: .leading)
+            #if !os(tvOS)
+            // iOS/Mac: keep the list, search field, and rows clear of the screen edges (the reported
+            // left/right clipping on iPhone). The ScrollView already respects the safe area, so this
+            // sits inside the notch / rounded corners; the canvas behind still bleeds full-screen via
+            // the background's ignoresSafeArea below.
+            .padding(.horizontal, Theme.Space.sm)
+            #endif
         }
         .background(Theme.Palette.canvas.ignoresSafeArea())
         .task { catalog.load() }
