@@ -88,6 +88,13 @@ struct TVPlayerView: View {
     // Flipping this re-renders `playerSurface` from AVPlayer to the mpv surface on the SAME TVPlayerView,
     // so the heavyweight forceMPV window rebuild is no longer needed for the common AVPlayer load failure.
     @State private var avEngineFailed = false
+    // AVPlayer-only START watchdog: AVPlayer can mount, show the chrome, and silently never produce a
+    // playable frame (no item error, no timePos tick), e.g. a debrid Dolby Vision MP4 it can't decode.
+    // Without this, the only guard was the shared 30s loadTimeout, so the owner saw ~30s of dead chrome
+    // before libmpv took over. This fires after avStartWatchdogSeconds and routes to the SAME libmpv
+    // fallback the .failed case uses. AVPlayer-only: libmpv torrents legitimately warm up far longer.
+    @State private var avStartWatchdog: Task<Void, Never>?
+    private let avStartWatchdogSeconds: Double = 6
     @State private var loadTimeout: Task<Void, Never>?
     @State private var autoRetryCount = 0              // bounded auto-recovery attempts before the error overlay
     @State private var reconnecting = false            // showing the "Reconnecting…" auto-retry state
@@ -246,7 +253,7 @@ struct TVPlayerView: View {
             }
         }
         .onDisappear {
-            hideTask?.cancel(); loadTimeout?.cancel(); recoveryDeadline?.cancel(); autoRetryTask?.cancel(); skipFetchTask?.cancel(); stallWatchdog?.cancel()
+            hideTask?.cancel(); loadTimeout?.cancel(); recoveryDeadline?.cancel(); autoRetryTask?.cancel(); skipFetchTask?.cancel(); stallWatchdog?.cancel(); avStartWatchdog?.cancel()
             saveProgress(at: currentTime)   // no-op for live
             if !isCurrentLiveStream {
                 core.reportProgress(timeSeconds: currentTime, durationSeconds: duration)   // flush final position (never for live)
@@ -317,6 +324,7 @@ struct TVPlayerView: View {
             if let d = data as? Double {
                 if d > 0, !hasStartedPlaying {            // playback actually began
                     hasStartedPlaying = true; loadTimeout?.cancel(); recoveryDeadline?.cancel(); recoveryDeadline = nil; loadFailed = false
+                    avStartWatchdog?.cancel(); avStartWatchdog = nil   // a playable frame arrived: cancel the AVPlayer fallback
                     autoRetryCount = 0; reconnecting = false; autoRetryTask?.cancel()   // playback started: clear auto-recovery
                     // Live has no resumable position, so don't seed Continue-Watching direct-resume
                     // for it (mirrors PlayerScreen.recordLastStream's live guard).
@@ -367,15 +375,7 @@ struct TVPlayerView: View {
                 // re-renders `playerSurface` to the mpv surface on the SAME view, which re-loads the stream.
                 // This is the true last resort the owner asked for, replacing the heavyweight forceMPV window
                 // rebuild for the common case. Genuine mpv failures fall through to the existing recovery.
-                if useAVPlayerEngine, isAVPlayerActive {
-                    // Tear the AVPlayer engine down NOW (cancels its periodic time observer + KVO) before
-                    // flipping the flag, so no stray timePos tick can land in the surface-swap window and set
-                    // hasStartedPlaying, which would suppress a later genuine libmpv failure. SwiftUI's
-                    // dismantleUIView also calls stop(); it is idempotent, so the double-stop is safe.
-                    coordinator.player?.stop()
-                    avEngineFailed = true
-                    return
-                }
+                if demoteAVPlayerToMPV() { return }
                 handleLoadFailure((data as? String) ?? "")
             }
         case MPVProperty.endFileEof:
@@ -1380,6 +1380,7 @@ struct TVPlayerView: View {
     private func startLoadTimeout() {
         loadTimeout?.cancel()
         startRecoveryDeadline()   // first call arms the overall cap; later calls (hops) leave it running
+        startAVStartWatchdog()    // AVPlayer-only fast fallback to libmpv when it mounts but never plays
         loadTimeout = Task { @MainActor in
             try? await Task.sleep(for: .seconds(30))
             guard !hasStartedPlaying else { return }
@@ -1390,6 +1391,40 @@ struct TVPlayerView: View {
             if hopToNextSource(reason: "load timeout") { return }
             if loadErrorMsg.isEmpty { loadErrorMsg = "Timed out, the source never started." }
             withAnimation { loadFailed = true }
+        }
+    }
+
+    /// Demote the active AVFoundation engine to libmpv IN PLACE (the #76 fallback). Tears the AVPlayer
+    /// engine down NOW (cancels its periodic time observer + KVO) before flipping `avEngineFailed`, so no
+    /// stray timePos tick can land in the surface-swap window and set hasStartedPlaying (which would
+    /// suppress a later genuine libmpv failure). SwiftUI's dismantleUIView also calls stop(); it is
+    /// idempotent, so the double-stop is safe. Returns true when it actually demoted (caller should bail),
+    /// false when AVPlayer is not the active engine and the caller should run its normal failure path.
+    @discardableResult
+    private func demoteAVPlayerToMPV() -> Bool {
+        guard useAVPlayerEngine, isAVPlayerActive else { return false }
+        avStartWatchdog?.cancel(); avStartWatchdog = nil
+        coordinator.player?.stop()
+        avEngineFailed = true
+        return true
+    }
+
+    /// AVPlayer-only START watchdog. AVPlayer can mount and present its chrome yet never produce a playable
+    /// frame (no item .failed, no timePos tick), so the only existing guard was the shared 30s loadTimeout,
+    /// which the owner saw as ~30s of dead chrome before libmpv finally took over. If AVFoundation is the
+    /// active engine and playback still has not begun after avStartWatchdogSeconds, route to the SAME libmpv
+    /// fallback the .failed case uses. NOT armed for libmpv (torrents legitimately warm up far longer, which
+    /// is what the 30s loadTimeout / torrent warm-up budget cover). Cancelled the moment playback starts
+    /// (the timePos handler cancels loadTimeout/recoveryDeadline and clears this) or the view goes away.
+    private func startAVStartWatchdog() {
+        avStartWatchdog?.cancel()
+        guard useAVPlayerEngine, !forceMPV, !avEngineFailed else { return }
+        avStartWatchdog = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(avStartWatchdogSeconds))
+            guard !Task.isCancelled, !hasStartedPlaying else { return }
+            guard isAVPlayerActive else { return }   // already on libmpv (or torn down): nothing to demote
+            DiagnosticsLog.log("player", "AVPlayer start watchdog \(Int(avStartWatchdogSeconds))s reached with no playable frame, falling back to libmpv")
+            demoteAVPlayerToMPV()
         }
     }
 

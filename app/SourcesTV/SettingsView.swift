@@ -40,6 +40,10 @@ struct SettingsView: View {
     @AppStorage(MirrorSettings.libraryKey) private var mirrorLibrary = false
     @AppStorage(MirrorSettings.continueWatchingKey) private var mirrorCW = false
     @ObservedObject private var sourcePrefs = SourcePreferences.shared
+    /// Deterministic Down-chain insurance across the three top account rows so the spatial focus
+    /// engine cannot skip Log Out (it stranded far-right before 80fb9d2 and the owner could not reach it).
+    private enum AccountFocus: Hashable { case vortx, logOut, importStremio }
+    @FocusState private var accountFocus: AccountFocus?
 
     var body: some View {
         NavigationStack {
@@ -155,6 +159,7 @@ struct SettingsView: View {
                     Label("VortX account & sync", systemImage: "arrow.triangle.2.circlepath")
                 }
                 .buttonStyle(ChipButtonStyle(selected: false))
+                .focused($accountFocus, equals: .vortx)
                 if account.isSignedIn {
                     // Identity is a non-focusable info row; Log Out is its OWN full-width row directly
                     // BELOW it, in the same left-aligned column as every other account row. The old layout
@@ -177,6 +182,7 @@ struct SettingsView: View {
                     }
                     .buttonStyle(ChipButtonStyle(selected: true, accent: Theme.Palette.danger, accentText: Theme.Palette.danger))
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .focused($accountFocus, equals: .logOut)
                 } else {
                     NavigationLink { LoginView(account: account) } label: {
                         Label("Sign in to your Stremio account", systemImage: "person.crop.circle")
@@ -187,6 +193,7 @@ struct SettingsView: View {
                     Label("Import from Stremio", systemImage: "square.and.arrow.down.on.square")
                 }
                 .buttonStyle(ChipButtonStyle(selected: false))
+                .focused($accountFocus, equals: .importStremio)
                 NavigationLink { MetadataKeysView() } label: {
                     Label("Metadata (TMDB, MDBList)", systemImage: "sparkles")
                 }
@@ -412,7 +419,7 @@ struct SettingsView: View {
             Text("Switches the whole app to this language. VortX must quit and reopen to apply it.")
                 .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
 
-            choiceRow("Live TV tab", [("1", "Show"), ("0", "Hide")],
+            choiceRow("Show Live TV tab", [("1", "Show"), ("0", "Hide")],
                       selection: Binding(get: { hideLiveTab ? "0" : "1" }, set: { hideLiveTab = ($0 == "0") }))
             Text("Hide the Live TV tab if you do not use it.")
                 .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)

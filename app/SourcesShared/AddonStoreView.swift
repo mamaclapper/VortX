@@ -75,6 +75,12 @@ struct AddonStoreView: View {
     @ObservedObject private var health = AddonHealthStore.shared
     @State private var query = ""
     @State private var installing: Set<String> = []
+    #if os(tvOS)
+    // tvOS focus hand-off: Down from the search field is otherwise swallowed by the text-entry surface
+    // and never reaches the result rows. We move focus to the first row explicitly on a Down press.
+    @FocusState private var searchFocused: Bool
+    @FocusState private var focusedRow: String?
+    #endif
 
     private var installed: Set<String> { Set(core.addons.map(\.transportUrl)) }
 
@@ -118,7 +124,17 @@ struct AddonStoreView: View {
                 } else if !catalog.addons.isEmpty && filtered.isEmpty {
                     hint("No add-ons match \"\(query)\".")
                 }
+                #if os(tvOS)
+                // Group the result rows into their own focus section so the focus engine treats them as a
+                // coherent destination: Down from the (separate) search field reliably lands on the first
+                // row instead of being trapped in the text field (issue F).
+                VStack(alignment: .leading, spacing: Theme.Space.lg) {
+                    ForEach(filtered) { storeRow($0) }
+                }
+                .focusSection()
+                #else
                 ForEach(filtered) { storeRow($0) }
+                #endif
             }
             .padding(.horizontal, Theme.Space.screenInset)
             .padding(.vertical, Theme.Space.xl)
@@ -131,19 +147,39 @@ struct AddonStoreView: View {
     private var searchField: some View {
         HStack(spacing: Theme.Space.sm) {
             Image(systemName: "magnifyingglass").foregroundStyle(Theme.Palette.textTertiary)
-            TextField("Search add-ons", text: $query)
-                .disableAutocorrection(true)
-                .frame(maxWidth: 560)
+            field
         }
         .padding(Theme.Space.md)
         .background(Theme.Palette.surface1, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+    }
+
+    @ViewBuilder private var field: some View {
+        #if os(tvOS)
+        // Down from the search field hands focus to the first result row instead of being swallowed by
+        // the tvOS text-entry surface (the "can't leave search" trap, issue F). The .focusSection() around
+        // the rows is the primary fix; this is belt-and-suspenders so Down always escapes the field.
+        TextField("Search add-ons", text: $query)
+            .disableAutocorrection(true)
+            .frame(maxWidth: 560)
+            .focused($searchFocused)
+            .onMoveCommand { direction in
+                if direction == .down, let first = filtered.first {
+                    searchFocused = false
+                    focusedRow = first.id
+                }
+            }
+        #else
+        TextField("Search add-ons", text: $query)
+            .disableAutocorrection(true)
+            .frame(maxWidth: 560)
+        #endif
     }
 
     private func storeRow(_ addon: StoreAddon) -> some View {
         let isInstalled = installed.contains(normalizedManifestURL(addon.transportUrl))
         let isInstalling = installing.contains(addon.transportUrl)
         let h = health.status[addon.transportUrl] ?? .unknown
-        return HStack(alignment: .top, spacing: Theme.Space.md) {
+        let content = HStack(alignment: .top, spacing: Theme.Space.md) {
             AsyncImage(url: addon.manifest.logo.flatMap(URL.init(string:))) { image in
                 image.resizable().aspectRatio(contentMode: .fit)
             } placeholder: {
@@ -188,39 +224,59 @@ struct AddonStoreView: View {
         }
         .padding(Theme.Space.md)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.Palette.surface1, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-        // Lazy per-row probe: only visible rows hit the network, so a 200-entry catalog never bursts.
-        .task { health.probeOne(addon.transportUrl) }
+
+        #if os(tvOS)
+        // tvOS: the whole row is a focusable Button styled with RowFocusStyle, the same surface card
+        // (ember ring + colored-shadow lift) every other tvOS list row uses (stream/episode rows in
+        // DetailView, Settings rows). This replaces the default white/fat focus effect with the app's
+        // own treatment (issue G) AND makes every row a real focus target so the Down beam from the
+        // search field can land on the list (issue F). Tapping the row installs when not installed;
+        // the trailing installControl stays as the visible status. iOS/Mac keep the plain card below.
+        return Button { if !isInstalled { installStore(addon) } } label: { content }
+            .buttonStyle(RowFocusStyle())
+            .focused($focusedRow, equals: addon.id)
+            // Lazy per-row probe: only visible rows hit the network, so a 200-entry catalog never bursts.
+            .task { health.probeOne(addon.transportUrl) }
+        #else
+        return content
+            .background(Theme.Palette.surface1, in: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+            // Lazy per-row probe: only visible rows hit the network, so a 200-entry catalog never bursts.
+            .task { health.probeOne(addon.transportUrl) }
+        #endif
     }
 
     @ViewBuilder
     private func installControl(_ addon: StoreAddon, isInstalled: Bool, isInstalling: Bool) -> some View {
+        #if os(tvOS)
+        // tvOS: the whole row is the focusable Button (RowFocusStyle), so this is a NON-focusable status
+        // chip only (a focusable Button here would nest inside the row's Button). Selecting the row runs
+        // the install; this chip just shows the current state. Installed/Installing rows still pull the
+        // focus scroll because the row itself is now focusable.
         if isInstalled {
-            #if os(tvOS)
-            // tvOS scrolls a ScrollView via the FOCUS ENGINE: the list only scrolls when focus can step to
-            // a focusable row below the fold. The default add-ons that head the collection are all
-            // "Installed", and a plain Label is NOT focusable, so the early rows offered no focus target
-            // and the whole store was stuck at the top (the reported "can't scroll" bug). A no-op Button
-            // styled as the installed state gives each installed row a focusable control (with visible focus
-            // feedback) so focus travels through every row and pulls the scroll. Never `.disabled` (that
-            // would make it unfocusable again). iOS/Mac scroll by touch/trackpad and keep the plain label.
-            Button { } label: {
-                Label("Installed", systemImage: "checkmark").font(Theme.Typography.label)
-            }
-            .buttonStyle(ChipButtonStyle(selected: true))
-            .fixedSize()
-            #else
             Label("Installed", systemImage: "checkmark")
                 .font(Theme.Typography.label)
                 .foregroundStyle(Theme.Palette.ok)
                 .fixedSize()
-            #endif
+        } else {
+            Label(isInstalling ? "Installing…" : "Install",
+                  systemImage: isInstalling ? "arrow.triangle.2.circlepath" : "plus")
+                .font(Theme.Typography.label)
+                .foregroundStyle(Theme.Palette.accent)
+                .fixedSize()
+        }
+        #else
+        if isInstalled {
+            Label("Installed", systemImage: "checkmark")
+                .font(Theme.Typography.label)
+                .foregroundStyle(Theme.Palette.ok)
+                .fixedSize()
         } else {
             Button(isInstalling ? "Installing…" : "Install") { installStore(addon) }
                 .buttonStyle(PrimaryActionStyle())
                 .disabled(isInstalling)
                 .fixedSize()
         }
+        #endif
     }
 
     private func installStore(_ addon: StoreAddon) {
