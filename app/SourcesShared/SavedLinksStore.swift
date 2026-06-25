@@ -16,6 +16,14 @@ enum SavedLinksStore {
         var poster: String?
         var isMagnet: Bool
         var savedAt: Date
+        // #81: bind a saved magnet to the EXACT file the user actually played. When both are present,
+        // re-opening rebuilds the play URL directly as {serverBase}/{infoHash}/{fileIdx}, so a season
+        // pack reopens the same episode instead of re-showing the picker or replaying the biggest file.
+        // Optional + decoded leniently so entries saved before this field still load (the magnet still
+        // works, it just re-resolves the old way). Never carries catalog meta: the anti-poison invariant
+        // (PlayedLinkLibrary) keeps magnets out of the account library; this binding is local only.
+        var infoHash: String? = nil
+        var fileIdx: Int? = nil
     }
 
     private static let cap = 100
@@ -44,6 +52,31 @@ enum SavedLinksStore {
     static func isSaved(_ link: String, profileID: UUID?) -> Bool {
         guard let profileID else { return false }
         return load(profileID).contains { $0.id == link }
+    }
+
+    /// #81: pull `(infoHash, fileIdx)` out of a torrent play URL of the form
+    /// `{serverBase}/{infoHash}/{fileIdx}` (what OpenLink builds for every magnet file). Returns nil for
+    /// any other shape (direct/debrid/HLS links), so only real torrent files get the exact-file binding.
+    /// A 40-hex or 32+-char info hash followed by an integer file index is required; anything else is nil.
+    static func torrentParts(from playURL: URL) -> (infoHash: String, fileIdx: Int)? {
+        let parts = playURL.pathComponents.filter { $0 != "/" && !$0.isEmpty }
+        guard parts.count >= 2, let idx = Int(parts[parts.count - 1]) else { return nil }
+        let hash = parts[parts.count - 2].lowercased()
+        guard hash.count >= 32, hash.allSatisfy(\.isHexDigit) else { return nil }
+        return (hash, idx)
+    }
+
+    /// #81: after a magnet file actually plays, remember the EXACT file on its ALREADY-saved entry so
+    /// re-opening replays the same file (a season pack reopens the same episode, not the picker or the
+    /// biggest file). Update-only: we never auto-add an entry the user did not choose to save, so the
+    /// Saved list is not cluttered by every one-off play. Local only; never touches the account library.
+    static func bindPlayedFile(magnetLink: String, playURL: URL, profileID: UUID?) {
+        guard let profileID, let parts = torrentParts(from: playURL),
+              let existing = load(profileID).first(where: { $0.id == magnetLink }) else { return }
+        save(.init(id: existing.id, link: existing.link, name: existing.name,
+                   poster: existing.poster, isMagnet: existing.isMagnet, savedAt: existing.savedAt,
+                   infoHash: parts.infoHash, fileIdx: parts.fileIdx),
+             profileID: profileID)
     }
 
     /// Save (or move-to-top) an entry. Keyed by the link, so saving the same one twice de-dupes.

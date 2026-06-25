@@ -116,16 +116,32 @@ enum PlayedLinkLibrary {
     }
 
     /// A confidence score in (0, 1] when `name` is a trustworthy match for the already-normalized query
-    /// `q`, else nil. Exact match = 1; a pure subtitle/suffix difference (one is a prefix of the other and
-    /// they are close in length) = 0.95; otherwise an edit-distance similarity must clear 0.82. The
-    /// length guard stops a generic short query ("kamen rider") from matching a longer specific title
-    /// ("kamen rider geats").
+    /// `q`, else nil. Exact match = 1; otherwise an edit-distance similarity must clear 0.82.
+    ///
+    /// #81: a bare prefix match is NOT enough on its own. The old rule scored any prefix where the shorter
+    /// was >= 70% of the longer as 0.95, which let a franchise root adopt a different entry: "kamen rider"
+    /// (11) is a strict prefix of "kamen rider w" (13) at 85%, and of "kamen rider geats" too, so a generic
+    /// magnet got mapped to whichever sequel happened to come back first. Now a prefix is only trusted when
+    /// the tail it omits is trivial (a year, a colon, an edition word folded to a few chars): the absolute
+    /// gap must be tiny (<= 2 chars) AND the shorter must still be the dominant share (>= 88%). Anything
+    /// looser falls through to the edit-distance bar, which a real sequel title cannot clear against a bare
+    /// root, so an unmatched franchise magnet stays in SavedLinksStore only rather than poisoning the library.
     private static func matchScore(_ q: String, _ name: String) -> Double? {
         guard !q.isEmpty, !name.isEmpty else { return nil }
         if q == name { return 1.0 }
         let shorter = q.count <= name.count ? q : name
         let longer  = q.count <= name.count ? name : q
-        if longer.hasPrefix(shorter), Double(shorter.count) >= 0.7 * Double(longer.count) { return 0.95 }
+        if longer.hasPrefix(shorter) {
+            // A trivial omitted tail (a year, a colon, an edition word folded to a couple of chars) is a
+            // safe subtitle/suffix difference: trust it. Anything larger is a franchise root sitting in
+            // front of a distinct sequel ("kamen rider" vs "kamen rider geats") -> reject outright, and do
+            // NOT let edit-distance rescue it (1 - 6/17 still clears 0.82 for a short tail), or the magnet
+            // would adopt the wrong show.
+            if longer.count - shorter.count <= 2, Double(shorter.count) >= 0.88 * Double(longer.count) {
+                return 0.95
+            }
+            return nil
+        }
         let sim = similarity(q, name)
         return sim >= 0.82 ? sim : nil
     }

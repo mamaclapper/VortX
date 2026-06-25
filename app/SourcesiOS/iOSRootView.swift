@@ -1134,6 +1134,7 @@ private struct iOSOpenLinkView: View {
     @State private var status: String?
     @State private var resolveTask: Task<Void, Never>?   // in-flight magnet resolution; cancelled if the sheet closes
     @State private var fileChoices: [OpenLinkMagnet.TorrentFile]? = nil   // multi-file pack → show the picker
+    @State private var magnetLink: String? = nil                         // the magnet the open picker belongs to (#81)
     @State private var saved: [SavedLinksStore.Entry] = []               // saved magnets/links for this profile (#81)
     @AppStorage(PlaybackSettings.Key.directLinksOnly) private var directLinksOnly = false
 
@@ -1233,6 +1234,18 @@ private struct iOSOpenLinkView: View {
     }
 
     private func playSaved(_ entry: SavedLinksStore.Entry) {
+        // #81: a magnet bound to an exact file replays THAT file directly, skipping re-resolution and the
+        // Cinemeta re-match (which could land on a different show / re-show the picker / play the biggest
+        // file). Direct/debrid links and not-yet-bound magnets fall through to the normal resolve path.
+        if entry.isMagnet, !PlaybackSettings.torrentsDisabled,
+           let infoHash = entry.infoHash, let fileIdx = entry.fileIdx,
+           let url = URL(string: "\(StremioServer.base)/\(infoHash)/\(fileIdx)") {
+            if let magnet = OpenLinkMagnet.parse(entry.link) {
+                OpenLinkMagnet.warmUp(magnet)   // re-create the torrent on the server so the file endpoint is ready
+            }
+            onPlay(iOSPlayerLaunch(url: url, title: entry.name, isTorrent: true))
+            return
+        }
         input = entry.link
         play()
     }
@@ -1253,7 +1266,7 @@ private struct iOSOpenLinkView: View {
                 status = "That magnet link has no usable info hash."
                 return
             }
-            playMagnet(magnet)
+            playMagnet(magnet, link: text)
             return
         }
         // Recognise a streaming-service link (0.3.9 Phase 1: Twitch resolves in-app to HLS; YouTube is
@@ -1304,7 +1317,7 @@ private struct iOSOpenLinkView: View {
         }
     }
 
-    private func playMagnet(_ magnet: OpenLinkMagnet.Magnet) {
+    private func playMagnet(_ magnet: OpenLinkMagnet.Magnet, link: String) {
         working = true
         status = "Fetching torrent info… this can take up to a minute"
         resolveTask = Task { @MainActor in
@@ -1321,8 +1334,13 @@ private struct iOSOpenLinkView: View {
                 let savedName = magnet.name ?? fileName
                 onPlay(iOSPlayerLaunch(url: url, title: savedName))
                 Task { await PlayedLinkLibrary.savePlayedTorrent(displayName: savedName) }   // #81
+                // #81: if this magnet is in the user's Saved list, bind it to the exact file it just
+                // resolved to, so re-opening rebuilds the play URL directly instead of re-resolving.
+                SavedLinksStore.bindPlayedFile(magnetLink: link, playURL: url,
+                                               profileID: ProfileStore.shared.activeID)
             case .choose(let files):
                 status = nil
+                magnetLink = link     // remember which magnet this picker belongs to, for the exact-file bind
                 fileChoices = files   // a multi-file pack: show the picker, the user taps a file to play
             }
         }
@@ -1341,6 +1359,10 @@ private struct iOSOpenLinkView: View {
                 VStack(spacing: Theme.Space.sm) {
                     ForEach(files) { file in
                         Button {
+                            if let link = magnetLink {   // #81: bind the saved magnet to this chosen file
+                                SavedLinksStore.bindPlayedFile(magnetLink: link, playURL: file.url,
+                                                               profileID: ProfileStore.shared.activeID)
+                            }
                             onPlay(iOSPlayerLaunch(url: file.url, title: file.name))
                             Task { await PlayedLinkLibrary.savePlayedTorrent(displayName: file.name) }   // #81
                         } label: {
@@ -1460,6 +1482,26 @@ private enum OpenLinkMagnet {
         guard let best = (videos.isEmpty ? indexed : videos).max(by: { ($0.element.length ?? 0) < ($1.element.length ?? 0) }),
               let url = playURL(best.offset) else { return nil }
         return .single(url: url, fileName: best.element.name ?? "Torrent")
+    }
+
+    /// #81: re-create the torrent on the embedded server (fire-and-forget) so a saved magnet's already
+    /// bound file endpoint `/{infoHash}/{fileIdx}` is ready to serve. The engine ignores peerSearch on a
+    /// torrent it already has, so this is a no-op if it's still alive and a cheap re-arm if it was reaped.
+    static func warmUp(_ magnet: Magnet) {
+        guard !PlaybackSettings.torrentsDisabled,
+              let url = URL(string: "\(StremioServer.base)/\(magnet.infoHash)/create") else { return }
+        let sources = TorrentTrackers.sources(forHash: magnet.infoHash, streamSources: nil,
+                                              addonTrackers: magnet.trackers)
+        let payload: [String: Any] = [
+            "torrent": ["infoHash": magnet.infoHash],
+            "peerSearch": ["sources": sources, "min": 40, "max": 150],
+        ]
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        URLSession.shared.dataTask(with: request).resume()
     }
 
     /// RFC 4648 base32 (the older magnet info-hash encoding) to lowercase hex.
