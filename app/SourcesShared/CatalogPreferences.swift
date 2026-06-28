@@ -79,22 +79,37 @@ struct CatalogManagerView: View {
     }
 
     var body: some View {
+        #if os(tvOS)
+        scrollBody   // focus-driven; reorder via the buttons (no drag gesture on tvOS)
+        #else
+        listBody     // iPhone / iPad / Mac: drag-to-reorder + the buttons
+        #endif
+    }
+
+    /// Header shared by both layouts: title, blurb, and the group-by-add-on shortcut.
+    private var header: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.md) {
+            Text("Customize catalogs")
+                .font(Theme.Typography.sectionTitle)
+                .foregroundStyle(Theme.Palette.textPrimary)
+            Text("Choose which rows appear on Home and the order they show in.")
+                .font(Theme.Typography.body)
+                .foregroundStyle(Theme.Palette.textSecondary)
+            if !ordered.isEmpty {
+                // One-tap: group every add-on's catalogs together, in add-on (priority) order.
+                Button { groupByAddonOrder() } label: {
+                    Label("Group by add-on order", systemImage: "rectangle.3.group")
+                }
+                .buttonStyle(ChipButtonStyle(selected: false))
+                .fixedSize()
+            }
+        }
+    }
+
+    private var scrollBody: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.md) {
-                Text("Customize catalogs")
-                    .font(Theme.Typography.sectionTitle)
-                    .foregroundStyle(Theme.Palette.textPrimary)
-                Text("Choose which rows appear on Home and the order they show in.")
-                    .font(Theme.Typography.body)
-                    .foregroundStyle(Theme.Palette.textSecondary)
-                if !ordered.isEmpty {
-                    // One-tap: group every add-on's catalogs together, in add-on (priority) order.
-                    Button { groupByAddonOrder() } label: {
-                        Label("Group by add-on order", systemImage: "rectangle.3.group")
-                    }
-                    .buttonStyle(ChipButtonStyle(selected: false))
-                    .fixedSize()
-                }
+                header
                 let items = ordered
                 if items.isEmpty {
                     Text("No catalogs yet. Install an add-on that provides catalogs first.")
@@ -111,6 +126,44 @@ struct CatalogManagerView: View {
         }
         .background(Theme.Palette.canvas.ignoresSafeArea())
     }
+
+    #if !os(tvOS)
+    /// A List so rows can be DRAG-reordered (macOS drags directly; iPhone/iPad use the Edit button). The
+    /// per-row move buttons stay as a fallback and for move-to-top/bottom. `.onMove` rewrites the order.
+    private var listBody: some View {
+        let items = ordered
+        return List {
+            header
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            if items.isEmpty {
+                Text("No catalogs yet. Install an add-on that provides catalogs first.")
+                    .font(Theme.Typography.body)
+                    .foregroundStyle(Theme.Palette.textSecondary)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            } else {
+                ForEach(Array(items.enumerated()), id: \.element.key) { index, info in
+                    row(info, index: index, total: items.count, keys: items.map(\.key))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 4, leading: Theme.Space.screenInset, bottom: 4, trailing: Theme.Space.screenInset))
+                }
+                .onMove { source, dest in
+                    var keys = items.map(\.key)
+                    keys.move(fromOffsets: source, toOffset: dest)
+                    prefs.reorder(keys)
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Theme.Palette.canvas.ignoresSafeArea())
+        #if os(iOS)
+        .toolbar { EditButton() }
+        #endif
+    }
+    #endif
 
     @ViewBuilder
     private func row(_ info: CoreBridge.CatalogInfo, index: Int, total: Int, keys: [String]) -> some View {
