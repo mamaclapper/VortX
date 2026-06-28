@@ -409,7 +409,9 @@ struct iOSHomeView: View {
                                                              releaseInfo: $0.releaseInfo, imdbRating: $0.imdbRating,
                                                              genres: $0.genres)
                                                 },
-                                                onTap: handleTap))
+                                                onTap: handleTap,
+                                                // #95: horizontal infinite scroll for THIS catalog row.
+                                                onReachEnd: { core.loadBoardRowNextPage(engineIndex: row.engineIndex) }))
                                 // Vertical infinite scroll: reaching the last populated catalog row loads the
                                 // next page of Home catalogs (no-op past the end / while one is in flight).
                                 .onAppear {
@@ -1648,6 +1650,9 @@ private struct PosterRail: View {
     var menu: iOSPosterMenu = .none
     /// Opens a card's detail page (used by the Continue Watching menu's Details item, since a CW tap resumes).
     var onDetails: ((RailItem) -> Void)? = nil
+    /// Horizontal infinite scroll: fired when the LAST card appears, so a Home catalog row loads its next
+    /// page of items (#95). nil on rails that do not paginate (Continue Watching, editorial collections).
+    var onReachEnd: (() -> Void)? = nil
     #if os(macOS)
     /// macOS keyboard browse: when Home passes its `@FocusState` binding, the rail's cards become
     /// `.focusable()` and join the native focus traversal (arrows move within / between rails, Enter
@@ -1673,6 +1678,9 @@ private struct PosterRail: View {
                     LazyHStack(spacing: Theme.Space.sm) {
                         ForEach(items) { item in
                             railCard(item, proxy: proxy)
+                                // #95: horizontal infinite scroll. The last card pages the catalog (no-op
+                                // on rails without onReachEnd: Continue Watching, editorial collections).
+                                .onAppear { if item.id == items.last?.id { onReachEnd?() } }
                         }
                     }
                     .padding(.horizontal, Theme.Space.md)

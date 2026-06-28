@@ -315,6 +315,8 @@ final class CoreBridge: ObservableObject {
     func loadBoard(rows: Int = 30) {
         boardRowsLoaded = rows
         boardPageInFlight = false
+        boardRowPageInFlight = [:]   // catalogs reload from page 1, so engine indices reset (#95)
+        boardRowExhausted = []
         dispatch(action: ["action": "Load",
                           "args": ["model": "CatalogsWithExtra",
                                    "args": ["type": NSNull(), "extra": []]]],
@@ -331,6 +333,15 @@ final class CoreBridge: ObservableObject {
     /// onAppear events can't fire duplicate loads (mirrors `discoverPageInFlight`).
     private var boardPageInFlight = false
 
+    /// Per-row ITEM pagination for the Home board (#95: a Home catalog row was capped at its first page,
+    /// e.g. MyTraktSync stuck at ~20 while it scrolls forever on official Stremio). The board only ever
+    /// range-loaded whole ROWS; the engine's `CatalogsWithExtra.LoadNextPage(index)` appends the next page
+    /// to ONE catalog, which we drive per row on horizontal scroll. Keyed by the engine catalog index
+    /// (stable across LoadNextPage + board widening; carried on `CoreBoardRow.engineIndex`). Both maps are
+    /// touched only on the main queue (mirrors `boardPageInFlight`).
+    private var boardRowPageInFlight: [Int: Int] = [:]   // engineIndex -> item count when the load was dispatched
+    private var boardRowExhausted: Set<Int> = []          // engine indices whose last settled load added nothing
+
     /// True while the last board load filled its requested window, so there may be more catalogs to show.
     /// Once the engine returns fewer rows than asked, every catalog is on screen and this goes false.
     var boardHasNextPage: Bool { boardRows.count >= boardRowsLoaded }
@@ -345,6 +356,37 @@ final class CoreBridge: ObservableObject {
         dispatch(action: ["action": "CatalogsWithExtra",
                           "args": ["action": "LoadRange", "args": ["start": 0, "end": boardRowsLoaded]]],
                  field: "board")
+    }
+
+    /// Load the next page of ITEMS for one Home catalog row (#95, the horizontal infinite scroll). The
+    /// engine appends to `board.catalogs[engineIndex]` and re-emits `board`, so the row grows in place.
+    /// No-op while a page is already in flight for this row, or once the row is exhausted (a settled load
+    /// added no new items). Call from the row's last-card `onAppear`. Main-queue only (mirrors the others).
+    func loadBoardRowNextPage(engineIndex: Int) {
+        guard !boardRowExhausted.contains(engineIndex), boardRowPageInFlight[engineIndex] == nil else { return }
+        guard let board = decode(CoreBoardState.self, field: "board"), engineIndex < board.catalogs.count else { return }
+        let count = board.catalogs[engineIndex].compactMap { $0.content?.ready }.flatMap { $0 }.count
+        guard count > 0 else { return }   // the row has not hydrated yet; nothing to page from
+        boardRowPageInFlight[engineIndex] = count
+        dispatch(action: ["action": "CatalogsWithExtra",
+                          "args": ["action": "LoadNextPage", "args": engineIndex]],
+                 field: "board")
+    }
+
+    /// Reconcile in-flight per-row pagination after a `board` emit (#95). A SETTLED load (the catalog no
+    /// longer loading) that GREW the row clears the in-flight gate so the next page can load; a settled
+    /// load that added nothing marks the row exhausted so it stops (a finite catalog never loops on no-op
+    /// loads, mirroring `discoverExhausted`). Main-queue only; takes the board decoded off-main by the caller.
+    private func reconcileBoardRowPagination(_ board: CoreBoardState?) {
+        guard !boardRowPageInFlight.isEmpty, let board else { return }
+        for (index, dispatchedCount) in boardRowPageInFlight {
+            guard index < board.catalogs.count else { boardRowPageInFlight[index] = nil; continue }
+            let pages = board.catalogs[index]
+            if pages.contains(where: { $0.content?.isLoading == true }) { continue }   // still settling; wait
+            let count = pages.compactMap { $0.content?.ready }.flatMap { $0 }.count
+            boardRowPageInFlight[index] = nil
+            if count <= dispatchedCount { boardRowExhausted.insert(index) }
+        }
     }
 
     /// Ensure the Live tab can see EVERY installed add-on's live catalogs. The Live surface filters the
@@ -1133,7 +1175,13 @@ final class CoreBridge: ObservableObject {
         // The board needs ctx (addon manifests) for row titles, so rebuild on either change.
         if fields.contains("board") || fields.contains("ctx") {
             let rows = buildBoardRows()
-            DispatchQueue.main.async { [weak self] in self?.boardRows = rows; self?.boardPageInFlight = false }
+            let boardState = decode(CoreBoardState.self, field: "board")   // decode off-main; reconcile on main
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.reconcileBoardRowPagination(boardState)   // #95: settle per-row horizontal pagination
+                self.boardRows = rows
+                self.boardPageInFlight = false
+            }
         }
         if fields.contains("ctx") {
             DispatchQueue.main.async { [weak self] in self?.addonNamesCache = nil }   // addon set changed → rebuild name map
@@ -1228,7 +1276,7 @@ final class CoreBridge: ObservableObject {
         let titles = catalogTitleMap()
         let disabledAddons = ProfileStore.activeDisabledAddons()   // per-profile add-on set, hoisted once
         var rows: [CoreBoardRow] = []
-        for catalog in board.catalogs {
+        for (engineIndex, catalog) in board.catalogs.enumerated() {
             guard let request = catalog.first?.request else { continue }
             guard !disabledAddons.contains(request.base) else { continue }
             let items = catalog.compactMap { $0.content?.ready }.flatMap { $0 }
@@ -1236,7 +1284,7 @@ final class CoreBridge: ObservableObject {
             let key = Self.catalogKey(base: request.base, type: request.path.type, id: request.path.id)
             if CatalogPrefsStore.isHidden(key) { continue }   // user hid this catalog row (catalog manager)
             rows.append(CoreBoardRow(id: key, title: titles[key] ?? request.path.id,
-                                     type: request.path.type, items: items))
+                                     type: request.path.type, items: items, engineIndex: engineIndex))
         }
         // Apply the user's catalog order; unlisted catalogs keep the engine's relative order after the listed ones.
         return rows.enumerated().sorted { a, b in

@@ -198,6 +198,10 @@ struct CoreBoardRow: Identifiable {
     let title: String
     let type: String
     let items: [CoreMeta]
+    /// Index of this catalog in the engine's `board.catalogs`, so a Home row can ask the engine to
+    /// `LoadNextPage(engineIndex)` for its own horizontal infinite scroll (#95). Stable across page
+    /// loads and board widening; `buildBoardRows` captures it before the display filter/sort.
+    let engineIndex: Int
 }
 
 /// The content types Stremio treats as Live TV (the same set tvOS uses for its live-tuned player

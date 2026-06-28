@@ -320,6 +320,7 @@ struct CoreCatalogRowView: View {
     let row: CoreBoardRow
     var focusModel: FocusedItemModel? = nil
     @EnvironmentObject private var theme: ThemeManager
+    @EnvironmentObject private var core: CoreBridge   // for per-row horizontal pagination (#95)
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.md) {
@@ -332,6 +333,9 @@ struct CoreCatalogRowView: View {
                                    onFocus: focusModel.map { model in
                                        { model.focus(item.focusedHero) }
                                    })
+                            // #95: horizontal infinite scroll. The last card asks the engine for this
+                            // catalog's next page, so a Home row keeps loading instead of capping at ~20.
+                            .onAppear { if item.id == row.items.last?.id { core.loadBoardRowNextPage(engineIndex: row.engineIndex) } }
                     }
                 }
                 .padding(.horizontal, Theme.Space.screenEdge)
