@@ -340,15 +340,16 @@ final class VortXSyncManager: ObservableObject {
                  "t": Int(item.state.timeOffset / 1000), "d": Int(item.state.duration / 1000),
                  "v": item.state.videoId ?? ""]
             }
-        // FLOOR vs MIRROR for the owner library, per the "Mirror library from Stremio" toggle (same
-        // shape as the add-on guard). FLOOR (OFF, default) = UNION the account's already-owned
-        // `doc.vortx.library` with the engine library, so a Stremio removal never removes from VortX and
-        // an empty/degraded engine can never SHRINK it. The `mirror CW` toggle, when OFF, is what keeps a
-        // prior in-progress item's t/d from being zeroed by a Stremio drop (the union preserves it).
-        // MIRROR (ON) = REPLACE: the engine (live Stremio set) is authoritative so removals propagate.
-        // NEVER-ZERO: REPLACE only when the engine library is non-empty; otherwise fall back to UNION.
+        // FLOOR vs MIRROR for the owner library, per the "Mirror library from Stremio" toggle. FLOOR (OFF,
+        // default) = UNION the account's already-owned `doc.vortx.library` with the engine library, so a
+        // Stremio removal never removes from VortX and an empty/degraded engine can never SHRINK it. The
+        // `mirror CW` toggle, when OFF, is what keeps a prior in-progress item's t/d from being zeroed by a
+        // Stremio drop (the union preserves it). MIRROR (ON) = REPLACE: the live Stremio set is authoritative
+        // so removals propagate - but ONLY with a live Stremio session AND a non-empty engine library, so a
+        // logged-out / mid-pull shrunken set can never propagate the shrink to every device (the add-on
+        // guard's clobber fix; the library has no official-defaults concept, so no `!engineIsDefaultOnly`).
         var libraryByID: [String: [String: Any]] = [:]
-        let mirrorReplaceLibrary = MirrorSettings.mirrorLibrary && !engineLibrary.isEmpty
+        let mirrorReplaceLibrary = MirrorSettings.mirrorLibrary && !engineLibrary.isEmpty && CoreBridge.shared.isLoggedIn()
         if !mirrorReplaceLibrary, let prior = (existingVortx?["library"] as? [[String: Any]]) {
             for entry in prior { if let id = entry["id"] as? String, !id.isEmpty { libraryByID[id] = entry } }
         }
@@ -657,15 +658,18 @@ final class VortXSyncManager: ObservableObject {
         var byUrl: [String: VortXOwnedAddon] = [:]
         var order: [String] = []   // preserve install order (AIOManager-compat: collection order = priority)
         func add(_ a: VortXOwnedAddon) {
-            if byUrl[a.transportUrl] == nil { order.append(a.transportUrl) }
-            byUrl[a.transportUrl] = a
+            // First sight wins both the order slot AND the descriptor, so the app/engine-owned set (added
+            // first below) defines the order spine and its richer descriptor is kept for a shared URL.
+            if byUrl[a.transportUrl] == nil { order.append(a.transportUrl); byUrl[a.transportUrl] = a }
         }
-        // doc.addons (web import) first, so doc.vortx.addons can overwrite with the richer app descriptor.
-        if let webAddons = doc["addons"] as? [[String: Any]] {
-            for raw in webAddons { if let a = VortXOwnedAddon(json: raw) { add(a) } }
-        }
+        // doc.vortx.addons (the app/engine-owned set) FIRST, so it defines the order spine - matching the
+        // write-side spine in vortxSummary - and its richer descriptor wins a URL present in both; then the
+        // web-import-only URLs append after.
         if let vortx = doc["vortx"] as? [String: Any], let appAddons = vortx["addons"] as? [[String: Any]] {
             for raw in appAddons { if let a = VortXOwnedAddon(json: raw) { add(a) } }
+        }
+        if let webAddons = doc["addons"] as? [[String: Any]] {
+            for raw in webAddons { if let a = VortXOwnedAddon(json: raw) { add(a) } }
         }
         return order.compactMap { byUrl[$0] }
     }
