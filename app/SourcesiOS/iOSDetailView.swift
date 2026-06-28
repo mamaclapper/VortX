@@ -529,19 +529,9 @@ struct iOSDetailView: View {
     /// The title block: the addon-provided logo when present (the editorial signature on the tvOS hero),
     /// otherwise the serif hero type.
     @ViewBuilder private var titleOrLogo: some View {
-        // ERDB serves a rating-baked logo by id when configured; otherwise the add-on's own meta.logo.
-        if let logo = PosterArtwork.logo(id: meta?.id, fallback: meta?.logo), let url = URL(string: logo), !logo.isEmpty {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let img):
-                    img.resizable().aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: 320, maxHeight: 110, alignment: .leading)
-                        .shadow(color: .black.opacity(0.45), radius: 10, y: 4)
-                default:
-                    heroTitle
-                }
-            }
-        } else {
+        // fanart.tv clearlogo first (when enabled), else the ERDB-aware add-on/metahub logo, else serif text.
+        ResolvedTitleLogo(id: meta?.id, type: meta?.type ?? "movie", fallbackLogo: meta?.logo,
+                          maxWidth: 320, maxHeight: 110, accessibilityName: meta?.name ?? "") {
             heroTitle
         }
     }

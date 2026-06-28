@@ -125,4 +125,52 @@ enum PosterArtwork {
         if ERDB.isActive, let id, let url = ERDB.imageURL("logo", id: id, fallback: nil) { return url }
         return fallback
     }
+
+    /// Async logo resolution shared by EVERY hero/detail logo slot: fanart.tv clearlogo first (when the
+    /// fanart toggle is on), else the synchronous ERDB-aware add-on/metahub logo. Keeps the fanart precedence
+    /// identical on tvOS, iOS, and Mac so no platform's logo diverges.
+    static func resolvedLogo(id: String?, type: String, fallback: String?) async -> String? {
+        guard let id else { return fallback }
+        if let f = await Fanart.logo(id: id, type: type) { return f }
+        return logo(id: id, fallback: fallback)
+    }
+}
+
+/// A title's clearlogo resolved ASYNC by id (`PosterArtwork.resolvedLogo`: fanart.tv first when enabled,
+/// else the ERDB-aware add-on/metahub logo), rendered as an image with a styled title-text fallback. EVERY
+/// hero/detail logo slot on tvOS, iOS, and Mac uses this so fanart + the logo precedence are IDENTICAL on
+/// all platforms (no per-platform divergence). The title text shows immediately and the logo swaps in once
+/// resolved (instant when fanart is off - no network; one hop when on), so the band never blanks.
+struct ResolvedTitleLogo<TitleText: View>: View {
+    let id: String?
+    let type: String
+    let fallbackLogo: String?
+    var maxWidth: CGFloat
+    var maxHeight: CGFloat
+    var shadowOpacity: Double = 0.45
+    var shadowRadius: CGFloat = 10
+    var shadowY: CGFloat = 4
+    var accessibilityName: String = ""
+    @ViewBuilder var titleText: () -> TitleText
+    @State private var logoURL: String?
+
+    var body: some View {
+        Group {
+            if let logoURL, !logoURL.isEmpty, let url = URL(string: logoURL) {
+                AsyncImage(url: url) { phase in
+                    if case .success(let img) = phase {
+                        img.resizable().aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: maxWidth, maxHeight: maxHeight, alignment: .leading)
+                            .shadow(color: .black.opacity(shadowOpacity), radius: shadowRadius, y: shadowY)
+                            .accessibilityLabel(accessibilityName)
+                    } else {
+                        titleText()
+                    }
+                }
+            } else {
+                titleText()
+            }
+        }
+        .task(id: id) { logoURL = await PosterArtwork.resolvedLogo(id: id, type: type, fallback: fallbackLogo) }
+    }
 }

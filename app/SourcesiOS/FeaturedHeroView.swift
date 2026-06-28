@@ -192,21 +192,10 @@ struct FeaturedHeroView: View {
     /// The add-on logo when enrichment surfaced one (the editorial signature), else the serif hero
     /// type — mirrors `iOSDetailView.titleOrLogo`.
     @ViewBuilder private func titleOrLogo(_ hero: FeaturedHeroItem) -> some View {
-        // ERDB serves a rating-baked logo by id when configured; otherwise the enrichment logo (meta/metahub).
-        if let logo = PosterArtwork.logo(id: hero.id, fallback: hero.logo), let url = URL(string: logo), !logo.isEmpty {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let img):
-                    img.resizable().aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: 320, maxHeight: 110, alignment: .leading)
-                        .shadow(color: .black.opacity(0.45), radius: 10, y: 4)
-                        // The logo is the title in image form — read the name, not the URL.
-                        .accessibilityLabel(hero.name)
-                default:
-                    heroTitle(hero)
-                }
-            }
-        } else {
+        // fanart.tv clearlogo first (when enabled), else the ERDB-aware add-on/metahub logo, else serif text.
+        // The shared component is used by tvOS + the detail pages too, so the logo behaves identically everywhere.
+        ResolvedTitleLogo(id: hero.id, type: hero.type, fallbackLogo: hero.logo,
+                          maxWidth: 320, maxHeight: 110, accessibilityName: hero.name) {
             heroTitle(hero)
         }
     }

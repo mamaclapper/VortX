@@ -265,19 +265,10 @@ struct DetailView: View {
     /// The title block: an ERDB rating-baked logo (or the add-on's clearart logo) by id when available,
     /// otherwise the serif hero title text. Mirrors iOS `iOSDetailView.titleOrLogo`.
     @ViewBuilder private func titleOrLogo(_ m: CoreMetaItem) -> some View {
-        if let logo = PosterArtwork.logo(id: m.id, fallback: m.logo), let url = URL(string: logo), !logo.isEmpty {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let img):
-                    img.resizable().aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: 640, maxHeight: 200, alignment: .leading)
-                        .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
-                        .accessibilityLabel(m.name)
-                default:
-                    heroTitleText(m)
-                }
-            }
-        } else {
+        // fanart.tv clearlogo first (when enabled), else the ERDB-aware add-on/metahub logo, else serif text.
+        ResolvedTitleLogo(id: m.id, type: m.type, fallbackLogo: m.logo,
+                          maxWidth: 640, maxHeight: 200, shadowOpacity: 0.5, shadowRadius: 12,
+                          accessibilityName: m.name) {
             heroTitleText(m)
         }
     }
