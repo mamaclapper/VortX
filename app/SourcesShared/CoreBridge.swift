@@ -150,6 +150,15 @@ final class CoreBridge: ObservableObject {
     /// `scheduleSessionRepair`'s inline test so launch / scenePhase / sync can share it.
     var hasNoStreamAddon: Bool { !addons.contains { $0.providesStreams } }
 
+    /// True when the engine has no USER-INSTALLED stream add-on (only the official stubs, or none). This
+    /// is the REAL "we lost the user's sources" signal: a Stremio logout / token-expiry reinstalls the
+    /// OFFICIAL stream stubs (local / WatchHub / Public Domain), so `hasNoStreamAddon` is structurally
+    /// FALSE after a logout even though every real title reports "no sources". The account-owns-everything
+    /// restore triggers off THIS so a logout re-applies the user's owned add-ons instead of staying wiped.
+    var hasNoUserStreamAddon: Bool {
+        !addons.contains { $0.providesStreams && !($0.isOfficial || $0.isProtected) }
+    }
+
     /// The raw installed add-on descriptors the engine currently holds (the exact `{transportUrl,
     /// manifest, flags}` objects kept for round-tripping), so the sync layer can snapshot the full
     /// descriptor set into the VortX account doc for network-free re-hydration. Account/engine add-on
@@ -234,7 +243,7 @@ final class CoreBridge: ObservableObject {
             guard let self, !self.switchInFlight, !self.awaitingAuthMigration else { return }
             let cwItems = self.decode(CoreCWPreview.self, field: "continue_watching_preview")?.items ?? []
             let noAccountData = self.continueWatching.isEmpty && cwItems.isEmpty && (self.library?.catalog.isEmpty ?? true)
-            let noStreamAddon = self.hasNoStreamAddon
+            let noStreamAddon = self.hasNoUserStreamAddon   // user-installed stream add-ons gone (logout-proof)
             guard noAccountData || noStreamAddon else { return }
             let key = Keychain.string(self.activeTokenAccount)
             let hasStremioToken = (key?.isEmpty == false)

@@ -142,6 +142,10 @@ struct CoreDescriptor: Decodable, Identifiable {
     var id: String { transportUrl }
     /// Default addons (Cinemeta, the local addon) the engine refuses to uninstall.
     var isProtected: Bool { flags?.protected ?? false }
+    /// A Stremio default/official add-on (Cinemeta, the local add-on, WatchHub, Public Domain, …). A
+    /// logout resets the profile to ONLY these, so "every add-on is official" means the user's installed
+    /// add-ons were wiped.
+    var isOfficial: Bool { flags?.official ?? false }
 
     var providesStreams: Bool { (manifest.resources ?? []).contains { $0.name == "stream" } }
     var providesMeta: Bool { (manifest.resources ?? []).contains { $0.name == "meta" } }

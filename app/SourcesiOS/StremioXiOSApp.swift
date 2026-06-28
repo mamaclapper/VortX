@@ -59,7 +59,7 @@ struct StremioXiOSApp: App {
                             // Account-owns-everything: if the engine is degraded (no stream add-on),
                             // hydrate the VortX account's owned add-ons + library so the lists never read
                             // zero on foreground. Idempotent + never-zero guarded inside the sync manager.
-                            if CoreBridge.shared.hasNoStreamAddon {
+                            if CoreBridge.shared.hasNoUserStreamAddon {
                                 await VortXSyncManager.shared.hydrateEngineFromOwnedAddons()
                             }
                             VortXSyncManager.shared.requestSyncSoon()     // then push THIS device's state (incl. the library + add-ons mirror) so the web dashboard repopulates on open, not only on background
@@ -83,7 +83,7 @@ struct StremioXiOSApp: App {
                     //    anchored ownership (addonsOwnedAt unset), so existing users get auto-migrated.
                     // Both are no-ops when signed out / unreachable (never-zero guarded inside the manager).
                     Task { @MainActor in
-                        if CoreBridge.shared.hasNoStreamAddon {
+                        if CoreBridge.shared.hasNoUserStreamAddon {
                             await VortXSyncManager.shared.hydrateEngineFromOwnedAddons()
                         }
                         if !CoreBridge.shared.addons.isEmpty,

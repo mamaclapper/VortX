@@ -383,7 +383,15 @@ final class VortXSyncManager: ObservableObject {
         // priority, so sync must not scramble it). The engine collection order is authoritative and is
         // the spine; in UNION mode the VortX-doc-only add-ons (in the prior sync but not the engine)
         // append after, in their own order. The engine descriptor wins on a URL in both (freshest).
+        // CLOBBER GUARD (data-loss fix): a Stremio logout / token-expiry resets the engine to the DEFAULT
+        // official add-ons - a NON-EMPTY set - so "non-empty" is the wrong REPLACE signal: REPLACE would
+        // overwrite the owned mirror with defaults and propagate that loss to every device. Only let
+        // REPLACE (the live-Stremio-is-authoritative path) win when there IS a live Stremio session AND the
+        // engine holds a genuinely user-owned set (not the official defaults). Otherwise UNION preserves the
+        // owned mirror, so a logout can never shrink doc.vortx.addons to defaults.
+        let engineIsDefaultOnly = engineAddons.allSatisfy { (($0["flags"] as? [String: Any])?["official"] as? Bool) == true }
         let mirrorReplaceAddons = MirrorSettings.mirrorAddons && !engineAddons.isEmpty
+            && CoreBridge.shared.isLoggedIn() && !engineIsDefaultOnly
         var addonList: [[String: Any]] = []
         var seenAddonURLs = Set<String>()
         for entry in engineAddons {
