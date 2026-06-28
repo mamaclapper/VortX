@@ -7,6 +7,7 @@ struct SettingsView: View {
     @EnvironmentObject private var core: CoreBridge
     @EnvironmentObject private var theme: ThemeManager
     @ObservedObject private var updates = UpdateChecker.shared
+    @ObservedObject private var catalogPrefs = CatalogPreferences.shared
     @EnvironmentObject private var profiles: ProfileStore
     @State private var serverOnline: Bool?
     @AppStorage("stremiox.forceSDRTonemap") private var forceSDRTonemap = false
@@ -425,6 +426,11 @@ struct SettingsView: View {
             choiceRow(String(localized: "Show Live TV tab"), [("1", "Show"), ("0", "Hide")],
                       selection: Binding(get: { hideLiveTab ? "0" : "1" }, set: { hideLiveTab = ($0 == "0") }))
             Text("Hide the Live TV tab if you do not use it.")
+                .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
+
+            choiceRow(String(localized: "Cinematic catalog cards"), [("1", "Landscape"), ("0", "Portrait")],
+                      selection: Binding(get: { catalogPrefs.landscapeCards ? "1" : "0" }, set: { catalogPrefs.landscapeCards = ($0 == "1") }))
+            Text("Show catalog posters as wide cinematic cards using clean TMDB artwork. Choose Portrait for the classic poster grid.")
                 .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
 
             choiceRow(String(localized: "Dolby Vision / HDR"), [("auto", "Auto"), ("on", "Tone-map to SDR"), ("off", "Always HDR")], selection: $hdrToneMapMode)

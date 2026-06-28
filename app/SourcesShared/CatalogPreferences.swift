@@ -7,9 +7,17 @@ import SwiftUI
 enum CatalogPrefsStore {
     static let hiddenKey = "stremiox.catalog.hidden"
     static let orderKey = "stremiox.catalog.order"
+    static let landscapeKey = "stremiox.catalog.landscapeCards"
 
     static func hidden() -> Set<String> { Set(UserDefaults.standard.stringArray(forKey: hiddenKey) ?? []) }
     static func order() -> [String] { UserDefaults.standard.stringArray(forKey: orderKey) ?? [] }
+    /// Cinematic landscape (16:9) catalog cards vs the legacy portrait (2:3) posters. Defaults to ON
+    /// (the key unset reads true), so a fresh install gets the cinematic look; the Appearance toggle
+    /// lets anyone fall back to portrait. Read as a plain static so card views can size off-main.
+    static func landscapeCards() -> Bool {
+        UserDefaults.standard.object(forKey: landscapeKey) == nil ? true : UserDefaults.standard.bool(forKey: landscapeKey)
+    }
+    static func setLandscapeCards(_ value: Bool) { UserDefaults.standard.set(value, forKey: landscapeKey) }
     static func isHidden(_ key: String) -> Bool { hidden().contains(key) }
     /// Position in the user's order, or `.max` so unlisted catalogs keep the engine's relative order after the listed ones.
     static func rank(_ key: String) -> Int { order().firstIndex(of: key) ?? Int.max }
@@ -27,6 +35,11 @@ final class CatalogPreferences: ObservableObject {
     static let shared = CatalogPreferences()
     @Published private(set) var hidden: Set<String> = CatalogPrefsStore.hidden()
     @Published private(set) var order: [String] = CatalogPrefsStore.order()
+    /// Drives whether catalog cards render as cinematic 16:9 landscape pills (TMDB backdrop) or
+    /// legacy portrait posters. Two-way bound by the Appearance toggle; persists on change.
+    @Published var landscapeCards: Bool = CatalogPrefsStore.landscapeCards() {
+        didSet { CatalogPrefsStore.setLandscapeCards(landscapeCards) }
+    }
     private init() {}
 
     func isHidden(_ key: String) -> Bool { hidden.contains(key) }

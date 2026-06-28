@@ -471,6 +471,12 @@ struct PosterCard: View {
     var onFocus: (() -> Void)? = nil   // browse pages report focus to drive the hero backdrop
     var directPlay: (() -> Void)? = nil   // Continue Watching: resume the same link straight into the player
     var onDetails: (() -> Void)? = nil    // Continue Watching: open the full detail page from the long-press menu
+    @ObservedObject private var catalogPrefs = CatalogPreferences.shared
+
+    /// Cinematic 16:9 landscape pill vs legacy 2:3 portrait poster, per the Appearance setting.
+    private var landscape: Bool { catalogPrefs.landscapeCards }
+    /// Landscape cards use one cinematic width; portrait cards honor the caller's `width`.
+    private var cardWidth: CGFloat { landscape ? kLandscapeCardWidth : width }
 
     var body: some View {
         if menu == .none {
@@ -497,7 +503,13 @@ struct PosterCard: View {
     private var legacyCardLabel: some View {
         Group {
             VStack(alignment: .leading, spacing: Theme.Space.sm) {
-                PosterArt(PosterArtwork.poster(id: id, fallback: poster), width: width)
+                Group {
+                    if landscape {
+                        LandscapeArt(id: id, type: type, poster: PosterArtwork.poster(id: id, fallback: poster), width: cardWidth)
+                    } else {
+                        PosterArt(PosterArtwork.poster(id: id, fallback: poster), width: cardWidth)
+                    }
+                }
                     .overlay(alignment: .bottom) {
                         if let progress, progress > 0.01 {
                             ProgressStripe(value: progress).padding(Theme.Space.xs)
@@ -508,7 +520,7 @@ struct PosterCard: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .foregroundStyle(Theme.Palette.textSecondary)
-                    .frame(width: width, alignment: .leading)
+                    .frame(width: cardWidth, alignment: .leading)
             }
             .background { if let onFocus { FocusReporter(onFocus: onFocus) } }
             // Pin the focus/long-press interaction region to the card's RESTING rect. Without this,

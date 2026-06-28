@@ -20,6 +20,7 @@ struct iOSSettingsView: View {
     @EnvironmentObject private var profiles: ProfileStore
     @ObservedObject private var sourcePrefs = SourcePreferences.shared
     @ObservedObject private var pinStore = SourcePinStore.shared
+    @ObservedObject private var catalogPrefs = CatalogPreferences.shared
     @State private var serverOnline: Bool?
     @State private var editingProfile: UserProfile?
     @State private var pendingDelete: UserProfile?   // context-menu delete confirmation target
@@ -774,6 +775,8 @@ struct iOSSettingsView: View {
             // backed and show even with no add-ons installed; this hides them (the "extra catalogs I
             // cannot remove from Home" report).
             Toggle("Show editorial Home rows", isOn: $showCuratedRails)
+            // Cinematic 16:9 landscape catalog cards (clean TMDB backdrops) vs the legacy portrait posters.
+            Toggle("Cinematic landscape cards", isOn: $catalogPrefs.landscapeCards)
 
             // ThemeAccentPicker / ThemeBackgroundPicker are tvOS-only (declared in SourcesTV); on
             // iOS we bind native Pickers to the SAME ThemeManager state (accentID, oled).

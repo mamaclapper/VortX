@@ -8,7 +8,13 @@ struct LibraryView: View {
     @EnvironmentObject private var account: StremioAccount
     @EnvironmentObject private var profiles: ProfileStore   // gate the Library on the active profile's own history
     @StateObject private var focusModel = FocusedItemModel()
-    private let columns = Array(repeating: GridItem(.fixed(kPosterWidth), spacing: Theme.Space.lg), count: 6)
+    @ObservedObject private var catalogPrefs = CatalogPreferences.shared
+    /// Cinematic landscape cards are wider, so fewer per row; portrait posters keep the dense 6-up grid.
+    private var columns: [GridItem] {
+        catalogPrefs.landscapeCards
+            ? Array(repeating: GridItem(.fixed(kLandscapeCardWidth), spacing: Theme.Space.lg), count: 3)
+            : Array(repeating: GridItem(.fixed(kPosterWidth), spacing: Theme.Space.lg), count: 6)
+    }
 
     var body: some View {
         NavigationStack {

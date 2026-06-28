@@ -1610,14 +1610,17 @@ private struct PosterGrid: View {
     /// The grid stays generic; the caller decides whether and what to load next. nil = no pagination.
     var onReachEnd: (() -> Void)? = nil
     @EnvironmentObject private var theme: ThemeManager   // observe textScale so Theme.Typography repaints live
-    // Center the adaptive tracks so the cards distribute evenly across the available width instead of
-    // packing to the leading edge. Min track matches the 120pt card + a little breathing room.
-    private let columns = [GridItem(.adaptive(minimum: 116), spacing: Theme.Space.sm, alignment: .center)]
+    @ObservedObject private var catalogPrefs = CatalogPreferences.shared
+    // Center the adaptive tracks so the cards distribute evenly across the available width. Min track
+    // matches the card width: 168pt landscape pills, or 116pt portrait (120pt card + breathing room).
+    private var columns: [GridItem] {
+        [GridItem(.adaptive(minimum: catalogPrefs.landscapeCards ? 168 : 116), spacing: Theme.Space.sm, alignment: .center)]
+    }
     var body: some View {
         LazyVGrid(columns: columns, alignment: .center, spacing: Theme.Space.md) {
             ForEach(items) { item in
                 Button { onTap(item) } label: {
-                    PosterCardiOS(id: item.id, name: item.name, poster: item.poster, fallbackArt: item.background, imdbRating: item.imdbRating,
+                    PosterCardiOS(id: item.id, type: item.type, name: item.name, poster: item.poster, fallbackArt: item.background, imdbRating: item.imdbRating,
                                   progress: item.progress, menu: menu)
                 }
                 .buttonStyle(.plain)
@@ -1694,7 +1697,7 @@ private struct PosterRail: View {
     /// into view, all additive modifiers so touch / VoiceOver / the existing tap + long-press are unchanged.
     @ViewBuilder private func railCard(_ item: RailItem, proxy: ScrollViewProxy) -> some View {
         let base = Button { onTap(item) } label: {
-            PosterCardiOS(id: item.id, name: item.name, poster: item.poster, fallbackArt: item.background, imdbRating: item.imdbRating,
+            PosterCardiOS(id: item.id, type: item.type, name: item.name, poster: item.poster, fallbackArt: item.background, imdbRating: item.imdbRating,
                           progress: item.progress, menu: menu,
                           onDetails: onDetails.map { od in { od(item) } })
         }
@@ -1820,8 +1823,72 @@ struct CachedPosterImage: View {
     }
 }
 
+/// iOS/Mac cinematic landscape (16:9) catalog art, the touch twin of tvOS `LandscapeArt`: a clean
+/// TEXTLESS TMDB backdrop resolved by id via `LandscapeBackdropCache`. With no TMDB backdrop (no key
+/// set, or none on TMDB) it does NOT crop a 2:3 poster into an ugly slab: it fills with a heavily
+/// blurred + darkened copy of the poster behind a fit copy, so the 16:9 frame always looks intentional.
+private struct LandscapeArtiOS: View {
+    let id: String
+    let type: String
+    let poster: String?
+    @State private var image: PlatformPosterImage?
+    @State private var usedBackdrop = false
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let image {
+                if usedBackdrop {
+                    imageView(image).resizable().scaledToFill()
+                } else {
+                    imageView(image).resizable().scaledToFill()
+                        .blur(radius: 18).opacity(0.55)
+                        .overlay(Color.black.opacity(0.35))
+                        .overlay(imageView(image).resizable().scaledToFit())
+                }
+            } else if failed {
+                Theme.Palette.surface1.overlay(
+                    Image(systemName: "film").font(.system(size: 24)).foregroundStyle(Theme.Palette.textTertiary))
+            } else {
+                Theme.Palette.surface1
+            }
+        }
+        .task(id: id) { await load() }
+    }
+
+    private func imageView(_ img: PlatformPosterImage) -> Image {
+        #if canImport(UIKit)
+        Image(uiImage: img)
+        #else
+        Image(nsImage: img)
+        #endif
+    }
+
+    private func load() async {
+        failed = false
+        let backdrop = await LandscapeBackdropCache.backdrop(id: id, type: type)
+        usedBackdrop = backdrop != nil
+        let raw = backdrop ?? PosterArtwork.poster(id: id, fallback: poster)
+        guard let raw, !raw.isEmpty, let u = URL(string: raw) else { failed = true; return }
+        if let cached = posterMemoryCacheiOS.object(forKey: u as NSURL) { image = cached; return }
+        var req = URLRequest(url: u)
+        req.cachePolicy = .returnCacheDataElseLoad   // immutable art: prefer the shared disk cache
+        do {
+            let (data, _) = try await URLSession.shared.data(for: req)
+            guard !Task.isCancelled else { return }
+            if let img = PlatformPosterImage(data: data) {
+                posterMemoryCacheiOS.setObject(img, forKey: u as NSURL)
+                image = img
+            } else { failed = true }
+        } catch {
+            if !Task.isCancelled { failed = true }   // a cancel (scrolled away) is not a failure; the next appear retries
+        }
+    }
+}
+
 private struct PosterCardiOS: View {
     let id: String
+    let type: String
     let name: String
     let poster: String?
     /// Backdrop to fall back to when an add-on item carries no `poster` (AIOMetadata sometimes omits it),
@@ -1834,7 +1901,14 @@ private struct PosterCardiOS: View {
     var menu: iOSPosterMenu = .none
     /// Per-card "open details" action, wired into the Continue Watching menu's Details item.
     var onDetails: (() -> Void)? = nil
+    @ObservedObject private var catalogPrefs = CatalogPreferences.shared
     @EnvironmentObject private var theme: ThemeManager   // observe textScale so Theme.Typography repaints live
+
+    /// Cinematic 16:9 landscape pill vs legacy 2:3 portrait poster, per the Appearance setting.
+    private var landscape: Bool { catalogPrefs.landscapeCards }
+    private var cardW: CGFloat { landscape ? 168 : 120 }
+    private var cardH: CGFloat { landscape ? 95 : 180 }   // 168 * 9/16 ≈ 95
+
     var body: some View {
         card.modifier(PosterContextMenu(id: id, menu: menu, onDetails: onDetails))
     }
@@ -1843,11 +1917,16 @@ private struct PosterCardiOS: View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .bottom) {
                 // Cached, self-retrying loader (not raw AsyncImage, which cancels on cell recycle and never
-                // retries, the blank-poster cause). scaledToFill inside CachedPosterImage keeps the source
-                // proportions and CROPS to the card, so non-2:3 add-on posters fill cleanly (F37), and a
-                // missing poster falls back to the title's backdrop before a plain film placeholder.
-                CachedPosterImage(url: PosterArtwork.poster(id: id, fallback: poster ?? fallbackArt))
-                    .frame(width: 120, height: 180)
+                // retries, the blank-poster cause). Landscape uses a clean TMDB backdrop (LandscapeArtiOS);
+                // portrait crops the poster to the card so non-2:3 add-on posters fill cleanly (F37).
+                Group {
+                    if landscape {
+                        LandscapeArtiOS(id: id, type: type, poster: poster ?? fallbackArt)
+                    } else {
+                        CachedPosterImage(url: PosterArtwork.poster(id: id, fallback: poster ?? fallbackArt))
+                    }
+                }
+                    .frame(width: cardW, height: cardH)
                     .clipped()
                     .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
                     .overlay(alignment: .topTrailing) {
@@ -1874,18 +1953,18 @@ private struct PosterCardiOS: View {
                     .frame(height: 4)
                 }
             }
-            .frame(width: 120, height: 180)
+            .frame(width: cardW, height: cardH)
             Text(name)
                 .font(Theme.Typography.label)
                 .foregroundStyle(Theme.Palette.textSecondary)
-                .lineLimit(1).frame(width: 120, alignment: .leading)
+                .lineLimit(1).frame(width: cardW, alignment: .leading)
         }
         // One contiguous tap + long-press target over the whole card (poster, the 6pt gap, and title).
         // Without it the .buttonStyle(.plain) label hit-tests as the UNION of its subview shapes, so the
         // inter-child gap and rounded-corner regions are dead zones that fall through to the adjacent
-        // grid cell — the reported "tap a card in row 1, the row-2 item opens". Rectangle (not the
+        // grid cell, the reported "tap a card in row 1, the row-2 item opens". Rectangle (not the
         // poster's RoundedRectangle) so the title and gap are inside the target and corners aren't dead.
-        .frame(width: 120, alignment: .leading)
+        .frame(width: cardW, alignment: .leading)
         .contentShape(Rectangle())
     }
 }
