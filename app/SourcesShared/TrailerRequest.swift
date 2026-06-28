@@ -16,13 +16,12 @@ struct TrailerRequest: Identifiable, Equatable {
     /// A non-YouTube `trailerStreams` url, if the meta carried a direct stream.
     let directURL: URL?
 
-    /// Prefer a direct stream; else the embedded server's `/yt` redirect. Nil when neither a
-    /// direct URL nor a (proxiable) YouTube id is available.
-    var playableURL: URL? {
-        if let directURL { return directURL }
-        guard let youTubeID, StremioServer.canProxy else { return nil }
-        return URL(string: "\(StremioServer.base)/yt/\(youTubeID)")
-    }
+    /// The libmpv-playable URL: a direct (non-YouTube) trailer stream, or nil. YouTube trailers are NO
+    /// longer playable through the embedded server's `/yt` route - tokenless InnerTube extraction now
+    /// returns LOGIN_REQUIRED - so a YouTube-only trailer has no playable URL here. iOS/Mac play it through
+    /// the WKWebView IFrame (`YouTubeEmbedView`) using `youTubeID` directly; tvOS (no web view) hides the
+    /// clip/chip when this is nil. That nil-hides-on-tvOS behavior is exactly the old Lite-build path.
+    var playableURL: URL? { directURL }
 
     /// The public YouTube watch link, for surfaces that open trailers externally.
     var watchURL: URL? {

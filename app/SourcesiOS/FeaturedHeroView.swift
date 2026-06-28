@@ -24,10 +24,10 @@ struct FeaturedHeroView: View {
     @EnvironmentObject private var theme: ThemeManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// The trailer presented full-screen IN-APP by the Trailer chip. A resolved playable URL
-    /// ({serverBase}/yt/{id} or a direct stream) handed to the native libmpv `PlayerScreen`, the same path
-    /// tvOS uses. Drives a cover.
-    @State private var trailerLaunch: HeroTrailerLaunch?
+    /// The trailer presented full-screen IN-APP by the Trailer chip - a YouTube id handed to the keyless
+    /// WKWebView IFrame cover (`TrailerEmbedCover`), the reliable YouTube path now that tokenless extraction
+    /// is dead. Drives a cover.
+    @State private var trailerEmbed: TrailerEmbedLaunch?
 
 
     /// Hero band height. iOS is 380: a bit bigger than the 0.3.0 320 (the user wanted a larger billboard),
@@ -69,11 +69,10 @@ struct FeaturedHeroView: View {
         // cross-fade, but keying the container guarantees art + overlay move as one.
         .animation(reduceMotion ? nil : .easeOut(duration: FeaturedHeroModel.heroCrossfade),
                    value: model.hero?.id)
-        // The Trailer chip presents the trailer IN-APP full-screen via the native libmpv player (the same
-        // path tvOS uses), a media cover so it fills the window on macOS too. No YouTube web embed.
-        .platformFullScreenPlayerCover(item: $trailerLaunch) { launch in
-            PlayerScreen(url: launch.url, title: launch.title, headers: nil, resumeSeconds: 0,
-                         recordMeta: nil, isTrailer: true, onClose: { trailerLaunch = nil })
+        // The Trailer chip presents the trailer IN-APP full-screen via the keyless WKWebView IFrame cover
+        // (the reliable YouTube path now that tokenless extraction is dead), filling the window on macOS too.
+        .platformFullScreenPlayerCover(item: $trailerEmbed) { launch in
+            TrailerEmbedCover(youTubeID: launch.youTubeID, title: launch.title, onClose: { trailerEmbed = nil })
                 .ignoresSafeArea()
         }
     }
@@ -86,9 +85,11 @@ struct FeaturedHeroView: View {
     /// clip plays. Decorative — the title / meta read first for VoiceOver.
     @ViewBuilder private var heroClip: some View {
         if !reduceMotion, let hero = model.hero,
-           let url = TrailerRequest(title: hero.name, youTubeID: hero.trailerYouTubeID, directURL: nil).playableURL {
-            // Home billboard = whole muted trailer on mpv's own inf loop (window nil), matching tvOS HomeView.
-            InHeroTrailerView(url: url, height: heroHeight)
+           let yt = hero.trailerYouTubeID, !yt.isEmpty {
+            // Home billboard = the muted, looping trailer through the WKWebView IFrame (tokenless /yt extraction
+            // is dead). Non-interactive so it stays ambient; the still backdrop underneath is the fallback.
+            YouTubeEmbedView(youTubeID: yt, mode: .background)
+                .frame(height: heroHeight).clipped().allowsHitTesting(false)
                 .id("hero-clip-\(hero.id)")    // reload the clip for each new featured item / rotation
                 .transition(reduceMotion ? .identity : .opacity)
         }
@@ -256,11 +257,11 @@ struct FeaturedHeroView: View {
     /// resolves (so the Lite build, with no proxy, auto-hides it the same way the detail page does).
     /// Tapping it opens an explicit full-screen IN-APP player cover; it never autoplays inline.
     @ViewBuilder private func trailerButton(_ hero: FeaturedHeroItem) -> some View {
-        if let url = TrailerRequest(title: hero.name, youTubeID: hero.trailerYouTubeID, directURL: nil).playableURL {
+        if let yt = hero.trailerYouTubeID, !yt.isEmpty {
             Button {
-                // Play the trailer in-app via the native libmpv player over the embedded server's `/yt`
-                // route — the same path tvOS uses. No YouTube web embed, no external hand-off.
-                trailerLaunch = HeroTrailerLaunch(url: url, title: "\(hero.name) — Trailer")
+                // Play the trailer in-app via the keyless WKWebView IFrame cover (the reliable YouTube path
+                // now that tokenless /yt extraction is dead), with a silent hand-off if a video blocks embedding.
+                trailerEmbed = TrailerEmbedLaunch(youTubeID: yt, title: "\(hero.name) — Trailer")
             } label: {
                 Label("Trailer", systemImage: "play.rectangle.fill")
             }
@@ -269,9 +270,9 @@ struct FeaturedHeroView: View {
     }
 }
 
-/// Identifiable launch box for the hero Trailer chip's in-app player cover (`platformFullScreenCover(item:)`).
-private struct HeroTrailerLaunch: Identifiable {
+/// Identifiable launch box for the hero Trailer chip's in-app IFrame cover (`platformFullScreenPlayerCover(item:)`).
+private struct TrailerEmbedLaunch: Identifiable {
     let id = UUID()
-    let url: URL
+    let youTubeID: String
     let title: String
 }

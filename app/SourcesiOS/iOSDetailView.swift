@@ -352,30 +352,20 @@ struct iOSDetailView: View {
         }
     }
 
-    /// Present the meta's trailer IN-APP through the native libmpv player, the exact path tvOS uses. A
-    /// direct (non-YouTube) trailer stream OR the embedded server's `/yt/{id}` route (resolved by an
-    /// InnerTube resolver in server.js) is handed to `PlayerScreen` with `isTrailer: true`. This removes
-    /// the old WKWebView YouTube embed (broken by YouTube's July-2025 Referer enforcement) and the
-    /// youtube:// deeplink (which errored then bounced to the YouTube app). Only when `playableURL` is nil
-    /// (e.g. the Lite build with no embedded server) does it fall back to opening the public link
-    /// externally, and that fallback is silent (no error flash).
+    /// Present the meta's trailer IN-APP. A direct (non-YouTube) trailer stream plays in the native libmpv
+    /// `PlayerScreen`; a YouTube trailer plays in the keyless WKWebView IFrame cover (`TrailerEmbedCover`),
+    /// which loads from a real youtube.com-origin document so it survives YouTube's embed-Referer
+    /// enforcement, with a silent hand-off to the YouTube app/browser if a specific video blocks embedding.
     private func playTrailer() {
         guard let m = meta else { return }
         let title = "\(m.name) Trailer"
         let req = TrailerRequest.from(meta: m)
-        // A direct (non-YouTube) trailer stream plays in the native player. A YouTube trailer is resolved
-        // to a direct stream by the embedded server's /yt InnerTube route and ALSO plays in libmpv (the
-        // inline path the rest of the ecosystem uses, not a fragile IFrame embed that hits YouTube's
-        // embed-Referer 152 error). The id comes from the engine meta or the Cinemeta/TMDB fallback. On
-        // the Lite (no-server) build playableURL is nil, so it hands off to the YouTube app/browser.
+        // Direct stream plays in libmpv; a YouTube id plays in the IFrame cover (tokenless /yt extraction is
+        // dead). The id comes from the engine meta or the Cinemeta/TMDB fallback (resolvedTrailerID).
         if let direct = req?.directURL {
             presentation = .trailerPlayer(url: direct, title: title)
         } else if let yt = req?.youTubeID ?? resolvedTrailerID, !yt.isEmpty {
-            if let url = TrailerRequest(title: title, youTubeID: yt, directURL: nil).playableURL {
-                presentation = .trailerPlayer(url: url, title: title)
-            } else if let watch = URL(string: "https://www.youtube.com/watch?v=\(yt)") {
-                TrailerOpener.open(watch)   // Lite (no embedded server): hand off to the YouTube app / browser
-            }
+            presentation = .trailerEmbed(youTubeID: yt, title: title)
         }
     }
 
@@ -484,24 +474,29 @@ struct iOSDetailView: View {
     /// The clip itself fades in a beat after the backdrop shows; the still art underneath is the permanent
     /// fallback, so a missing / slow / blocked clip never blanks the band, and no error is ever surfaced.
     @ViewBuilder private var heroTrailerClip: some View {
-        if autoplayTrailers, !reduceMotion, !LiveTypes.contains(type),
-           let url = detailTrailerURL {
-            // Detail hero = a short SILENT WINDOW (parity with tvOS DetailView's window: start 10, length 8).
-            InHeroTrailerView(url: url, height: backdropHeight, window: (start: 10, length: 8))
+        if autoplayTrailers, !reduceMotion, !LiveTypes.contains(type) {
+            if let direct = detailTrailerDirectURL {
+                // Direct (non-YouTube) stream: a short SILENT WINDOW in libmpv (parity with tvOS: start 10, length 8).
+                InHeroTrailerView(url: direct, height: backdropHeight, window: (start: 10, length: 8))
+            } else if let yt = detailTrailerYouTubeID {
+                // YouTube clip: a muted, windowed WKWebView IFrame (tokenless /yt extraction is dead). Non-
+                // interactive so it reads as ambient backdrop; the still art underneath stays as the fallback.
+                YouTubeEmbedView(youTubeID: yt, mode: .clip(startSeconds: 10, windowSeconds: 8))
+                    .frame(height: backdropHeight).clipped().allowsHitTesting(false)
+            }
         }
     }
 
-    /// The detail hero's resolved trailer playable URL: prefer the meta's own `TrailerRequest` (which
-    /// covers a direct, non-YouTube trailer stream as well as a YouTube id), else the Cinemeta-fallback
-    /// YouTube id (`resolvedTrailerID`) routed through the embedded server's `/yt`. Nil when neither
-    /// resolves or the embedded server cannot proxy (Lite build), in which case the still backdrop stays.
-    private var detailTrailerURL: URL? {
-        if let m = meta, let req = TrailerRequest.from(meta: m), let url = req.playableURL {
-            return url
-        }
-        if let yt = resolvedTrailerID, !yt.isEmpty {
-            return TrailerRequest(title: meta?.name ?? title, youTubeID: yt, directURL: nil).playableURL
-        }
+    /// A direct (non-YouTube) trailer stream from the meta, if any - plays natively in libmpv on every platform.
+    private var detailTrailerDirectURL: URL? {
+        guard let m = meta else { return nil }
+        return TrailerRequest.from(meta: m)?.directURL
+    }
+
+    /// The YouTube trailer id (engine meta's, else the Cinemeta/TMDB fallback) for the WKWebView IFrame clip.
+    private var detailTrailerYouTubeID: String? {
+        if let m = meta, let yt = TrailerRequest.from(meta: m)?.youTubeID, !yt.isEmpty { return yt }
+        if let yt = resolvedTrailerID, !yt.isEmpty { return yt }
         return nil
     }
 
