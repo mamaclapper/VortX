@@ -4,6 +4,40 @@ All notable changes to VortX, newest first. VortX is Apple TV first, with an iPh
 
 What is planned next is in [ROADMAP.md](ROADMAP.md). To request a feature or report a bug, start a [GitHub Discussion](https://github.com/VortXTV/VortX/discussions) or [open an issue](https://github.com/VortXTV/VortX/issues).
 
+## 0.3.8 Beta 12 - 2026-06-28 (pre-release)
+
+The Beta 11 follow-up. A focused pass on the bugs you reported: trailers that actually play, Continue Watching that behaves, a Home you can tidy up, sharper resolution labels, and working keyboard navigation on the Mac. In-place update, nothing resets. This is a beta, so please install it and report anything off.
+
+### Fixed
+
+- **Trailers play the real trailer again, on iPhone, iPad, and Mac.** The Trailer button was loading a fragile path that often failed and then fell through to playing the actual movie. It now plays the official YouTube trailer inside the app the way the rest of the ecosystem does, and it finds a trailer for many more titles (it also looks them up on TMDB now). Apple TV is unchanged.
+- **Finished titles leave Continue Watching.** A movie or episode watched to the end and then closed by hand used to stay in the row at its end position. It clears now, the same as when it plays out on its own.
+- **Resuming from Continue Watching works far more often.** A torrent resumed straight from the Continue Watching row often showed "sources didn't load" and made you reopen the title and pick a source again. The resume now re-arms the torrent with working trackers first, so it starts on its own.
+- **The resolution label is right on widescreen 4K.** A cinematic 4K film (a wide 2.40:1 frame) was labeled 1440p because the label read the picture height. It reads the width now, so 4K shows as 4K.
+- **A tiny file can no longer pose as 4K.** A small stream that merely carries "2160p" or "4K" in its title is no longer trusted as real 4K, so it stops topping the source list and showing a 4K badge it cannot back up.
+- **Mac: arrow keys move the selection on Home.** The keyboard highlight used to appear on a clicked card and then sit there; the arrow keys now move it across a row and between rows.
+
+### Added
+
+- **Hide the built-in Home rows.** The editorial rows (Critically Acclaimed, Hidden Gems, Modern Classics, Award Winners) are built in and used to show no matter what. A new switch in Settings, Appearance, "Show editorial Home rows," turns them off.
+
+## 0.3.8 Beta 11 - 2026-06-25 (pre-release)
+
+The Beta 10 fixes release. It works through the reports that came back from Beta 10. In-place update, nothing resets.
+
+### Fixed
+
+- **The catalog goes back to poster cards.** The wide landscape cards from Beta 10 showed cropped and sometimes wrong art, so the catalogs return to the reliable poster grid while a proper cinematic treatment is built on a dependable art source.
+- **The ERDB and fanart toggles stay off.** Turning them off used to flip back on within a second, because an incoming sync could overwrite a setting you just changed. Your toggle sticks now.
+- **Title logos are back on the hero and detail pages.** They had dropped to plain text; with the toggles fixed, the add-on logos return.
+- **Duplicate and reappearing profiles are cleaned up.** A second copy that a delete could not clear is removed and stays removed, and a deleted profile no longer comes back from a sync. Your main account profile stays non-deletable by design; you can rename it instead.
+- **Settings sync no longer fights you.** The cause behind the toggles and the profiles was a sync change that could re-apply your account's old values over a change you just made; the guard that protects an in-flight edit is restored.
+- **The Settings screen is fully translated** across all supported languages.
+
+### Note
+
+- **Dolby Vision plays through the built-in player on Apple TV,** confirmed on device, so you do not need anything else for true Dolby Vision.
+
 ## 0.3.8 Beta 10 - 2026-06-25 (pre-release)
 
 The Beta 9 cleanup release. Beta 9 landed the account and playback wave, and this release works through the report that came back from it. The headline is a cinematic redesign of the catalogs into wide landscape cards on every platform, plus trailers that now play inside the app on iPhone, iPad, and Mac, settings that sync across your devices again, and a batch of Apple TV navigation and focus fixes. In-place update, nothing resets. This is a beta, so please install it and report anything off.

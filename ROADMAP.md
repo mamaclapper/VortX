@@ -33,6 +33,14 @@ The bigger pieces, each its own chunk of work:
 - **1.x niceties.** Casting beyond AirPlay (Chromecast, DLNA, Roku); shader upscaling and tone-mapping for SDR screens; audio and color profiles; Discord presence; a built-in ad and tracker blocker; a taste-scored discovery feed.
 - **2.0, everywhere.** Apple Vision and the remaining platforms on the shared core, building on the native Mac, desktop, and Android foundations laid in 0.3.0.
 
+## Future directions we're exploring
+
+These are aspirational, not commitments, and the order may change. The idea is one unified, ranked source list that pulls from more than add-ons alone:
+
+- **Your own media servers.** Surface streams from a personal Plex, Jellyfin, or Emby server right next to add-on streams in the same ranked Watch Now list, so your own library and your add-ons live in one place. Works on Apple TV too, including the Lite (no-server) build for direct and debrid playback.
+- **Community JS scraper plugins.** A sideloadable scraper runtime so community JS scraper plugins can run inside VortX on every platform, Apple TV included, by pasting your own manifest URL (no curated or bundled source list, to keep VortX a neutral client). This is the same scraper runtime the version path lists at 1.0, broadened across surfaces.
+- **Trakt and SIMKL watch sync.** Sign in and mirror your watch history and watchlist to Trakt or SIMKL, so progress follows you across the apps you already use.
+
 ## Shipped
 
 - **The 0.3.8 account and power-user wave (betas through Beta 9).** A free end-to-end-encrypted account with cross-device profile and settings sync; the account now owns your add-ons, library, and sources (the app hydrates from it independent of a live Stremio session, with per-category Mirror-from-Stremio toggles); 64 languages with right-to-left support; true Dolby Vision through Apple's AVPlayer (with a fallback to the built-in player), now first-class on Apple TV under the full player chrome (AirPlay and Picture-in-Picture on Auto); per-profile add-ons with health checks; Kids Mode; in-app debrid keys; one-tap quality presets; regex source filters; profile library export and import; Import from Stremio; Where to Watch; anime skip; an in-player frame grab; poster rating overlays (served by VortX's own ratings and self-hosted ERDB art services); a fanart.tv key; fourteen seek-bar styles; in-app updates with an AltStore source; and inline in-hero trailers behind the art on iPhone, iPad, Mac, and Apple TV.
