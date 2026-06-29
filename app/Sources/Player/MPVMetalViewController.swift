@@ -772,15 +772,24 @@ final class MPVMetalViewController: PlatformViewController {
             readAhead = isLocalStream ? "96MiB" : "128MiB"
             #endif
         }
-        // With the on-disk cache armed (Settings → Streaming cache), the forward buffer is backed by the
-        // Caches dir, not RAM, so grow `demuxer-max-bytes` to the viewer's chosen budget — but only for a
-        // REMOTE (debrid/direct CDN) VOD stream, which is where a big seek-ahead buffer actually helps. A
-        // LOCAL torrent already buffers into the embedded server's own disk cache, and live must stay
-        // small (configureLiveMode owns its tight buffers), so those keep the RAM-safe read-ahead above.
-        // resolvedMaxBytes is always clamped to a fraction of FREE disk (and to a hard ceiling on the
-        // constrained Apple TV HD), so this can never fill the device even on "Unlimited".
+        // With the on-disk cache armed (Settings → Streaming cache) we lift `demuxer-max-bytes` for a
+        // REMOTE (debrid/direct CDN) VOD stream so the viewer gets a bigger seek-ahead buffer. CRITICAL:
+        // `demuxer-max-bytes` is mpv's HARD in-memory forward-buffer cap, and `cache-on-disk` does NOT
+        // reliably move it to the Caches dir on this MPVKit build, so the budget is held in RAM. Setting
+        // it to the full disk budget (hundreds of MB to GBs) jetsam-killed the Apple TV ~47s in, with the
+        // buffer ~800s / ~700MB ahead, even on the 3 GB ATV 4K. So clamp the APPLIED value to a device-safe
+        // RAM ceiling: the chosen cache size can lift the buffer above the proven default, but never past
+        // what the device survives. demuxer-max-bytes is a hard byte cap, so it bounds RAM regardless of
+        // bitrate or whether cache-on-disk offloads. (A LOCAL torrent buffers into the embedded server's
+        // own disk cache, and live owns its tight buffers, so those keep the RAM-safe read-ahead above.)
         if DiskCacheSetting.diskCacheEnabled, !live, !isLocalStream {
-            mpv_set_property_string(mpv, "demuxer-max-bytes", String(DiskCacheSetting.resolvedMaxBytes()))
+            #if os(macOS)
+            let ramCeiling: Int64 = 1_024 * 1024 * 1024   // Mac: out-of-process server + swap, generous
+            #else
+            let ramCeiling: Int64 = PerformanceMode.reduced ? 128 * 1024 * 1024 : 256 * 1024 * 1024
+            #endif
+            let applied = min(DiskCacheSetting.resolvedMaxBytes(), ramCeiling)
+            mpv_set_property_string(mpv, "demuxer-max-bytes", String(applied))
         } else {
             mpv_set_property_string(mpv, "demuxer-max-bytes", readAhead)
         }
