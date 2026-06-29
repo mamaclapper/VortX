@@ -2,6 +2,9 @@
 import Foundation
 import AVKit
 import AVFoundation
+import CoreImage
+import ImageIO
+import UniformTypeIdentifiers
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -44,6 +47,13 @@ final class AVPlayerEngineController: NSObject, PlayerEngine {
     private var observations: [NSKeyValueObservation] = []
     private var pipController: AVPictureInPictureController?
     private weak var playerLayer: AVPlayerLayer?
+    /// On-demand video frame tap for trickplay (community scrub previews). Pull-model: AVFoundation only
+    /// converts a frame when copyPixelBuffer is called (~every 10s), so it adds no steady-state cost. The MPV
+    /// engine captures via a Metal blit; AVPlayer previously had NO capture path (captureFrameJPEGData was a
+    /// nil stub), so AVPlayer-routed titles (Dolby Vision / HLS on Auto) generated zero trickplay frames.
+    /// Requesting BGRA output makes the system tone-map HDR / Dolby Vision frames to SDR, so the JPEG is usable.
+    private var videoOutput: AVPlayerItemVideoOutput?
+    private lazy var captureContext = CIContext(options: nil)
     private(set) var videoSizeMode = UserDefaults.standard.string(forKey: "stremiox.videoSize") ?? "original"
     // Cached AVMediaSelection groups + their MPVTrack views (loaded async once the item is ready). The
     // MPVTrack.id is the option's index in the group; mpv's -1 = off (deselect the group).
@@ -70,6 +80,12 @@ final class AVPlayerEngineController: NSObject, PlayerEngine {
         let options = (headers?.isEmpty ?? true) ? nil : ["AVURLAssetHTTPHeaderFieldsKey": headers!]
         let newItem = AVPlayerItem(asset: AVURLAsset(url: url, options: options))
         item = newItem
+        // Attach a pull-model frame tap so trickplay can grab the displayed frame on demand (see videoOutput).
+        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
+        ])
+        newItem.add(output)
+        videoOutput = output
         // START PROMPTLY. With the default (true), AVPlayer waits to build a stall-proof buffer before it
         // begins; for a large 4K / Dolby Vision debrid stream that wait can outlast any reasonable start
         // deadline, so the player mounts, shows the chrome, and never produces a frame (no item .failed, no
@@ -111,6 +127,7 @@ final class AVPlayerEngineController: NSObject, PlayerEngine {
         player.replaceCurrentItem(with: nil)
         pipController?.delegate = nil
         pipController = nil
+        videoOutput = nil
         item = nil
     }
 
@@ -239,7 +256,35 @@ final class AVPlayerEngineController: NSObject, PlayerEngine {
 
     // MARK: Trickplay / HDR
 
-    func captureFrameJPEGData(maxWidth: CGFloat, completion: @escaping (Data?) -> Void) { completion(nil) }
+    func captureFrameJPEGData(maxWidth: CGFloat, completion: @escaping (Data?) -> Void) {
+        guard let output = videoOutput else { completion(nil); return }
+        let time = player.currentTime()
+        // Protected (FairPlay) or not-yet-rendered frames return nil here; fail soft (skip this capture tick).
+        guard let pixelBuffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) else {
+            completion(nil); return
+        }
+        let ctx = captureContext
+        // Downscale + JPEG-encode off the main thread; CVPixelBuffer and CIContext are safe to hand off.
+        DispatchQueue.global(qos: .utility).async {
+            let data = Self.encodeJPEG(from: pixelBuffer, maxWidth: maxWidth, context: ctx)
+            DispatchQueue.main.async { completion(data) }
+        }
+    }
+
+    /// CVPixelBuffer (BGRA) -> downscaled JPEG via ImageIO (cross-platform; no UIKit/AppKit dependency).
+    private static func encodeJPEG(from pixelBuffer: CVPixelBuffer, maxWidth: CGFloat, context: CIContext) -> Data? {
+        let ci = CIImage(cvPixelBuffer: pixelBuffer)
+        let width = ci.extent.width
+        guard width > 0, ci.extent.height > 0 else { return nil }
+        let scale = min(1, maxWidth / width)
+        let image = scale < 1 ? ci.transformed(by: CGAffineTransform(scaleX: scale, y: scale)) : ci
+        guard let cg = context.createCGImage(image, from: image.extent) else { return nil }
+        let out = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(out, UTType.jpeg.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dest, cg, [kCGImageDestinationLossyCompressionQuality as String: 0.7] as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        return out as Data
+    }
     /// AVPlayerLayer negotiates HDR/DV with the display itself, so there is no app-driven HDR toggle here.
     var hdrAvailable: Bool { false }
 

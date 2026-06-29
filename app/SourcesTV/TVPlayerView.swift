@@ -2304,8 +2304,7 @@ struct TVPlayerView: View {
     }
 
     private func maybeCaptureLocalTrickplay(at time: Double) {
-        guard !isAVPlayerActive else { return }   // AVPlayer has no frame-capture; the scrub bubble stays hidden
-        guard !scrubbing, !buffering, !isPaused else { return }
+        guard !scrubbing, !buffering, !isPaused else { return }   // AVPlayer now captures too (AVPlayerItemVideoOutput)
         guard !localTrickplayCaptureInFlight else { return }
         guard time - lastLocalTrickplayCapture >= 10 else { return }
         lastLocalTrickplayCapture = time
