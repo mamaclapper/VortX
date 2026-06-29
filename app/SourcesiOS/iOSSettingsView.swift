@@ -57,6 +57,7 @@ struct iOSSettingsView: View {
     @AppStorage("vortx.discover.showCollectionsHub") private var showHubDiscover = true
     @AppStorage("vortx.collections.refreshCadence") private var hubCadence = "daily"
     @AppStorage("vortx.detail.showFinancials") private var showFinancials = true
+    @AppStorage("vortx.spoilerBlur") private var spoilerBlur = true
     #if os(iOS) || os(macOS)
     @AppStorage(PlayerEngineRouter.overrideKey) private var playerEngine = PlayerEngineRouter.Override.auto.rawValue
     #endif
@@ -810,6 +811,7 @@ struct iOSSettingsView: View {
             }
             NavigationLink("Reorder streaming services") { iOSReorderServicesView() }
             Toggle("Budget & box office", isOn: $showFinancials)
+            Toggle("Blur unwatched episode thumbnails", isOn: $spoilerBlur)
             // Cinematic 16:9 landscape catalog cards (clean TMDB backdrops) vs the legacy portrait posters.
             Toggle("Cinematic landscape cards", isOn: $catalogPrefs.landscapeCards)
 

@@ -22,6 +22,7 @@ struct SettingsView: View {
     @AppStorage("vortx.discover.showCollectionsHub") private var showHubDiscover = true
     @AppStorage("vortx.collections.refreshCadence") private var hubCadence = "daily"
     @AppStorage("vortx.detail.showFinancials") private var showFinancials = true
+    @AppStorage("vortx.spoilerBlur") private var spoilerBlur = true
     @AppStorage(SubtitleStyle.Key.font) private var subFont = SubtitleStyle.defaultFont
     @AppStorage(SubtitleStyle.Key.size) private var subSize = SubtitleStyle.defaultSize
     @AppStorage(SubtitleStyle.Key.sizeScale) private var subSizeScale = 1.0
@@ -477,6 +478,11 @@ struct SettingsView: View {
             choiceRow(String(localized: "Budget & box office"), [("1", "Show"), ("0", "Hide")],
                       selection: Binding(get: { showFinancials ? "1" : "0" }, set: { showFinancials = ($0 == "1") }))
             Text("Show a movie's budget, box office, and profit on its detail page. Movies only; needs a TMDB key.")
+                .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
+
+            choiceRow(String(localized: "Blur unwatched episodes"), [("1", "Blur"), ("0", "Show")],
+                      selection: Binding(get: { spoilerBlur ? "1" : "0" }, set: { spoilerBlur = ($0 == "1") }))
+            Text("Blur episode thumbnails you have not watched yet, to avoid spoilers.")
                 .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
 
             choiceRow(String(localized: "Dolby Vision / HDR"), [("auto", "Auto"), ("on", "Tone-map to SDR"), ("off", "Always HDR")], selection: $hdrToneMapMode)

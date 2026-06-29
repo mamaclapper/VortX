@@ -2,6 +2,9 @@ import SwiftUI
 #if canImport(AppKit)
 import AppKit
 #endif
+#if os(iOS)
+import AVKit   // AVRoutePickerView (in-player AirPlay button)
+#endif
 
 /// Full-screen native libmpv player for iOS / Mac, brought to parity with the tvOS `TVPlayerView`:
 /// transport (play/pause, seek, skip ±10s), in-player SOURCE SWITCHING (hop to another loaded source
@@ -1397,6 +1400,9 @@ struct PlayerScreen: View {
                 }
             }
             #endif
+            #if os(iOS)
+            AirPlayRoutePickerButton()   // start AirPlay from the player overlay (AVPlayer/HLS mirrors video, libmpv routes audio)
+            #endif
             iconButton("gearshape", label: "Player settings") { openPanel(.playerSettings) }   // decoder toggle + playback info (tvOS parity #22)
             iconButton("arrow.up.forward.app", label: "Play in another app") {       // hand off to Infuse / VLC / Share
                 hideTask?.cancel()
@@ -2605,5 +2611,30 @@ private extension View {
     func skipDBTooltip(_ text: String) -> some View {
         modifier(PlayerScreen.SkipDBHoverTooltip(text: text))
     }
+}
+#endif
+
+#if os(iOS)
+/// AirPlay route picker styled to match the player's circular icon buttons. iOS only (macOS handles AirPlay
+/// at the system level; there is no AVRoutePickerView there). Lets the user start AirPlay from the player
+/// overlay instead of only Control Center; the AVPlayer/HLS path mirrors video, libmpv routes audio.
+struct AirPlayRoutePickerButton: View {
+    var body: some View {
+        AirPlayPickerRepresentable()
+            .frame(width: 44, height: 44)
+            .background(.black.opacity(0.35), in: Circle())
+            .accessibilityLabel("AirPlay")
+    }
+}
+
+private struct AirPlayPickerRepresentable: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let v = AVRoutePickerView()
+        v.tintColor = .white
+        v.prioritizesVideoDevices = true
+        v.backgroundColor = .clear
+        return v
+    }
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
 }
 #endif

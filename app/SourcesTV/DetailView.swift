@@ -655,6 +655,7 @@ struct CoreSeasonedEpisodes: View {
     let videos: [CoreVideo]
     var watched: Set<String> = []
     var initialSeason: Int?
+    @AppStorage("vortx.spoilerBlur") private var spoilerBlur = true   // blur unwatched episode thumbnails to avoid spoilers
     @State private var showBulkMenu = false
     @EnvironmentObject private var core: CoreBridge
     @EnvironmentObject private var theme: ThemeManager   // observe so accent ticks recolor on theme change
@@ -787,7 +788,8 @@ struct CoreSeasonedEpisodes: View {
     }
 
     private func thumbnail(_ v: CoreVideo, isWatched: Bool, progress: Double) -> some View {
-        AsyncImage(url: URL(string: v.thumbnail ?? "")) { phase in
+        let blurArt = spoilerBlur && !isWatched   // hide future-episode imagery until you have watched it
+        return AsyncImage(url: URL(string: v.thumbnail ?? "")) { phase in
             switch phase {
             case .success(let img): img.resizable().aspectRatio(contentMode: .fill)
             default: Theme.Palette.surface2.overlay(
@@ -795,7 +797,13 @@ struct CoreSeasonedEpisodes: View {
             }
         }
         .frame(width: 300, height: 170)
+        .blur(radius: blurArt ? 20 : 0)
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
+        .overlay {
+            if blurArt {
+                Image(systemName: "eye.slash.fill").font(.title3).foregroundStyle(.white.opacity(0.85)).shadow(radius: 3)
+            }
+        }
         .overlay(alignment: .topTrailing) {
             if isWatched {
                 Image(systemName: "checkmark.circle.fill")

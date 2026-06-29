@@ -171,6 +171,7 @@ struct iOSDetailView: View {
     private var pinContext: SourcePinContext { SourcePinContext(metaId: id, isSeries: type == "series") }
     private var sourcePin: ResolvedPin? { pinStore.effectivePin(pinContext) }
     @AppStorage("stremiox.autoplayTrailers") private var autoplayTrailers = true
+    @AppStorage("vortx.spoilerBlur") private var spoilerBlur = true   // blur unwatched episode thumbnails to avoid spoilers
 
     // A SINGLE presentation slot drives every full-screen cover (player OR trailer). On macOS the
     // `platformFullScreenPlayerCover(item:)` calls become a `.sheet(item:)`, and two sheets attached to
@@ -1438,7 +1439,8 @@ struct iOSDetailView: View {
     }
 
     private func episodeThumbnail(_ v: CoreVideo, isWatched: Bool, progress: Double) -> some View {
-        AsyncImage(url: URL(string: v.thumbnail ?? "")) { phase in
+        let blurArt = spoilerBlur && !isWatched   // hide future-episode imagery until you have watched it
+        return AsyncImage(url: URL(string: v.thumbnail ?? "")) { phase in
             switch phase {
             case .success(let img): img.resizable().aspectRatio(contentMode: .fill)
             default:
@@ -1447,7 +1449,14 @@ struct iOSDetailView: View {
             }
         }
         .frame(width: 132, height: 74)
+        .blur(radius: blurArt ? 14 : 0)
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.chip, style: .continuous))
+        .overlay {
+            if blurArt {
+                Image(systemName: "eye.slash.fill").font(.footnote)
+                    .foregroundStyle(.white.opacity(0.85)).shadow(radius: 2).accessibilityHidden(true)
+            }
+        }
         .overlay(alignment: .topTrailing) {
             if isWatched {
                 Image(systemName: "checkmark.circle.fill")
