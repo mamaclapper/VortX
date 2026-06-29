@@ -6,6 +6,24 @@ What is planned next is in [ROADMAP.md](ROADMAP.md). To request a feature or rep
 
 ## Unreleased
 
+### Fixed
+
+- **Apple TV no longer crashes about 47 seconds into playback when the streaming cache is on.** The on-disk cache budget was being held as an in-memory buffer and pushed the Apple TV past its memory limit; it is now capped to a device-safe amount of RAM, so the cache can be on without the crash.
+- **Mac no longer crashes from the search bar.** The macOS search field lived in the window toolbar, which could throw under rapid UI updates; macOS now uses an inline search field instead.
+- **Title logos show for titles from any catalog.** A show or movie coming from a TMDB (or other non-IMDb) catalog now resolves its logo via the title's IMDb id, on the detail page and the Home hero, not only IMDb-catalog titles.
+- **A series detail page no longer crops the hero image.** Series that only ship a portrait poster now fit the hero band instead of cropping with black bars, on Apple TV, iPhone, iPad, and Mac.
+- **A finished download no longer fails with "cannot create file"** (the downloads folder is created before the file is saved).
+- **Mac: arrow keys move focus on Home,** and the Home hero no longer flickers through titles when focus changes.
+- **Video upscaling is now per-device** (standard on Apple TV, scaled on Mac if you choose) and no longer syncs over.
+- **The streaming cache is Off by default** (the picker used to show 2 GB while it was actually off).
+
+### Added
+
+- **Scrub-preview thumbnails now generate on every player engine.** They previously did not capture when a title played through the AVPlayer engine (Dolby Vision and HLS on Auto), so those titles produced no previews; they are captured and contributed now, on Apple TV, iPhone, iPad, and Mac.
+- **A Download button beside Quality** on the detail page (movies and episodes) downloads the auto-selected quality, with Download, Downloading, and Downloaded states and a Library badge that shows active downloads, on iPhone, iPad, and Mac.
+- **Apple TV: an in-player skip-segment editor.** Mark and submit intro, recap, outro, and preview times right from the Apple TV player; submissions go to VortX's open skip database and the community SkipDB. Thanks to OrigamiSpace, whose iPhone and Mac editor this is the Apple TV version of.
+- **Apple TV: offline downloads.** Download movies and episodes on Apple TV, with a note that the system can reclaim the space when storage runs low.
+
 ## 0.3.8 Beta 14 - 2026-06-29 (pre-release)
 
 The big one: the Apple TV crash/hang fix you asked for, offline downloads, our own skip database with an in-player editor, community scrub-preview thumbnails, grouped Home collections, a configurable streaming cache, and a wave of sync and add-on improvements. In-place update, nothing resets. Please install it and report anything off, especially the Apple TV stability on real hardware.
