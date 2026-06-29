@@ -200,19 +200,29 @@ struct iOSReorderServicesView: View {
 
     var body: some View {
         List {
-            Section(footer: Text("Set the order services appear in the Streaming row on Home and Discover. Drag to reorder.")) {
-                ForEach(model.providers) { provider in
-                    HStack(spacing: Theme.Space.sm) {
+            ForEach(model.providers) { provider in
+                HStack(spacing: Theme.Space.md) {
+                    ZStack {
+                        Theme.Palette.surface2
                         if let logo = provider.logoURL, let url = URL(string: logo) {
                             AsyncImage(url: url) { img in img.resizable().aspectRatio(contentMode: .fit) } placeholder: { Color.clear }
-                                .frame(width: 38, height: 24)
+                                .padding(7)
                         }
-                        Text(provider.name)
                     }
+                    .frame(width: 52, height: 34)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    Text(provider.name).font(Theme.Typography.cardTitle).foregroundStyle(Theme.Palette.textPrimary)
+                    Spacer()
+                    Image(systemName: "line.3.horizontal").foregroundStyle(Theme.Palette.textTertiary)
                 }
-                .onMove(perform: move)
+                .padding(.vertical, 6)
+                .listRowBackground(Theme.Palette.surface1)
+                .listRowSeparator(.hidden)
             }
+            .onMove(perform: move)
         }
+        .scrollContentBackground(.hidden)
+        .background(Theme.Palette.canvas.ignoresSafeArea())
         .navigationTitle("Reorder Services")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
