@@ -1,8 +1,9 @@
 import Foundation
 
-/// Offline downloads — the device-local data model. These types are OS-agnostic and compile on every
-/// Apple target (the UI entry points are gated `#if !os(tvOS)`; the model is not). A download is a
-/// physical file on ONE device plus a row in the local JSON index — it is NEVER E2E-synced and NEVER
+/// Offline downloads: the device-local data model. These types are OS-agnostic and compile on every
+/// Apple target, and the UI now lives on every target too (iOS/Mac in SourcesiOS, Apple TV in
+/// SourcesTV's DetailView Download button + TVDownloadsView). A download is a
+/// physical file on ONE device plus a row in the local JSON index: it is NEVER E2E-synced and NEVER
 /// written into a `libraryItem` document. Playback of a downloaded file still flows through the normal
 /// engine progress path (via `PlaybackMeta`), so per-profile watch history / Continue Watching keep
 /// working exactly as for a streamed source.
