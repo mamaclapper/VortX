@@ -4,6 +4,16 @@ All notable changes to VortX, newest first. VortX is Apple TV first, with an iPh
 
 What is planned next is in [ROADMAP.md](ROADMAP.md). To request a feature or report a bug, start a [GitHub Discussion](https://github.com/VortXTV/VortX/discussions) or [open an issue](https://github.com/VortXTV/VortX/issues).
 
+## Unreleased
+
+A stability pass aimed straight at the Apple TV crash where the whole device hangs, usually after you finish or stop a title and then open another. Please test this hard once it is in a build.
+
+### Fixed
+
+- **Apple TV no longer hangs the whole device after watching a torrent.** The streaming server keeps a memory cap that protects the Apple TV from running out of memory, but it was only set once at startup, with no confirmation it actually took. On a slow start it could silently miss, and the server then ran with a 2 GB cache that pushes the app past the Apple TV's memory limit, so the system kills it and the whole device goes sluggish (the menu bar stops responding, Back drops you to Home, and reopening shows the server offline). The cap is now confirmed and retried until it sticks, and it is re-applied right before each torrent starts, so every stream runs inside the safe limit.
+- **A finished movie leaves Continue Watching on every profile.** A movie watched to the end could stay pinned in Continue Watching, most often on a second profile. It clears now.
+- **Smoother second profile.** Watch progress was nudging the cross-device sync on every tick while you watched; it now waits until you pause or stop, which keeps a second profile from feeling laggy.
+
 ## 0.3.8 Beta 13 - 2026-06-28 (pre-release)
 
 The big bug-fix wave, plus the cinematic catalog rebuilt the right way. Trailers play again, Home rows keep loading, the catalog goes wide and cinematic, and a batch of Apple TV audio and HDR fixes are in that I need your help testing on real hardware. In-place update, nothing resets. This is a beta, so please install it and report anything off, especially the Apple TV sound and HDR notes at the bottom.
