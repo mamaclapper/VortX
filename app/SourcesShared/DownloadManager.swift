@@ -232,6 +232,11 @@ extension DownloadManager: URLSessionDownloadDelegate {
         var moveError: Error?
         if let dest {
             try? FileManager.default.removeItem(at: dest)
+            // Ensure the destination directory exists before the move/copy. If the Downloads dir was
+            // never created (or was reclaimed by the OS), moveItem/copyItem fails and the user sees
+            // "cannot create file" on completion. createDirectory is a no-op when it already exists.
+            try? FileManager.default.createDirectory(at: dest.deletingLastPathComponent(),
+                                                     withIntermediateDirectories: true)
             do { try FileManager.default.moveItem(at: location, to: dest) }
             catch {
                 // A cross-volume move can fail with EXDEV; fall back to a copy.
