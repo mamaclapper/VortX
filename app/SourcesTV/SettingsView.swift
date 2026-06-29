@@ -38,6 +38,7 @@ struct SettingsView: View {
     @AppStorage("stremiox.seekStep") private var seekStep = "10"   // skip step in seconds, shared with the player
     @AppStorage(PlayerEngineRouter.overrideKey) private var playerEngine = PlayerEngineRouter.Override.auto.rawValue
     @AppStorage("stremiox.autoSkip") private var autoSkip = false  // auto-skip intro/credits, shared with iOS/Mac
+    @AppStorage(CommunityTrickplay.settingKey) private var communityTrickplay = true  // share/fetch scrub previews
     @AppStorage(SkipTimestampService.providerKey) private var skipProvider = "both"
     @AppStorage(ExternalPlayers.defaultKey) private var defaultExternalPlayer = ""   // "" == built-in libmpv
     // Stremio mirror (account-owns-everything): default OFF = VortX keeps its own copy of each category;
@@ -282,6 +283,10 @@ struct SettingsView: View {
                 Label("Seek bar style", systemImage: "slider.horizontal.below.rectangle")
             }
             .buttonStyle(ChipButtonStyle(selected: false))
+            choiceRow(String(localized: "Community scrub previews"), [("0", "Off"), ("1", "On")],
+                      selection: Binding(get: { communityTrickplay ? "1" : "0" }, set: { communityTrickplay = ($0 == "1") }))
+            Text("Share and reuse scrub-preview thumbnails across the community, so previews appear instantly without each device regenerating them. Only the generated thumbnails are shared, never any account data.")
+                .font(Theme.Typography.label).foregroundStyle(Theme.Palette.textSecondary)
         }
     }
 

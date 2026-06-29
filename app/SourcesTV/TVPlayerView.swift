@@ -259,6 +259,10 @@ struct TVPlayerView: View {
         }
         .onDisappear {
             hideTask?.cancel(); loadTimeout?.cancel(); recoveryDeadline?.cancel(); autoRetryTask?.cancel(); skipFetchTask?.cancel(); stallWatchdog?.cancel(); avStartWatchdog?.cancel()
+            // Community trickplay: contribute this device's captured frames as a shared sprite-sheet
+            // (first-writer-wins, background, gated; no-op if the community already had a set, or on AVPlayer
+            // which captures nothing). Independent of the engine-teardown rules below.
+            scrubThumbnails.finishAndUploadIfNeeded(srcHeight: videoHeight)
             saveProgress(at: currentTime)   // no-op for live
             if !isCurrentLiveStream {
                 core.reportProgress(timeSeconds: currentTime, durationSeconds: duration)   // flush final position (never for live)
@@ -362,7 +366,14 @@ struct TVPlayerView: View {
         case MPVProperty.videoParamsSigPeak:
             if let p = data as? Double { isHDR = p > 1.0; metadataLine = computeMetadataLine() }
         case MPVProperty.duration:
-            if let d = data as? Double { duration = d; maybeResume(); refreshSkipSegments(); fetchSkipTimestamps(); fetchAddonSubtitles() }
+            if let d = data as? Double {
+                duration = d; maybeResume(); refreshSkipSegments(); fetchSkipTimestamps(); fetchAddonSubtitles()
+                // Community trickplay: fetch any shared sprite-sheet for this exact cut once the duration is
+                // known (fail-soft -> the existing local capture). Acts once per title.
+                if d > 0, let m = curMeta {
+                    scrubThumbnails.configureCommunity(imdbId: m.libraryId, season: m.season, episode: m.episode, duration: d)
+                }
+            }
         case MPVProperty.trackList:
             refreshTracks()
             let s = coordinator.player?.mediaSummary()

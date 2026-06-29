@@ -58,6 +58,7 @@ struct iOSSettingsView: View {
     @AppStorage(PlayerEngineRouter.overrideKey) private var playerEngine = PlayerEngineRouter.Override.auto.rawValue
     #endif
     @AppStorage("stremiox.autoSkip") private var autoSkip = false
+    @AppStorage(CommunityTrickplay.settingKey) private var communityTrickplay = true   // share/fetch scrub previews
     @AppStorage(SkipTimestampService.providerKey) private var skipProvider = "both"
     @AppStorage("stremiox.autoplayTrailers") private var autoplayTrailers = true
     // Empty string == built-in libmpv player; otherwise an ExternalPlayer.Target id to auto-open in.
@@ -415,6 +416,10 @@ struct iOSSettingsView: View {
                 Text("Both").tag("both")
             }
             NavigationLink("Seek bar style") { SeekBarStylePicker() }
+            Toggle("Community scrub previews", isOn: $communityTrickplay)
+                .tint(Theme.Palette.accent)
+            Text("Share and reuse scrub-preview thumbnails across the community, so previews appear instantly without each device regenerating them. Only the generated thumbnails are shared, never any account data.")
+                .font(.caption).foregroundStyle(.secondary)
             Toggle("Autoplay trailers", isOn: $autoplayTrailers)
                 .tint(Theme.Palette.accent)
             #if os(iOS)

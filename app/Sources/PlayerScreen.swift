@@ -444,6 +444,10 @@ struct PlayerScreen: View {
             hideTask?.cancel(); loadTimeout?.cancel(); autoRetryTask?.cancel()
             stallWatchdog?.cancel(); recoveryDeadline?.cancel(); skipFetchTask?.cancel()
             refreshTask?.cancel(); sleepTask?.cancel()
+            // Community trickplay: contribute this device's captured frames as a shared sprite-sheet
+            // (first-writer-wins, background, gated; no-op if the community already had a set). Never
+            // touches the player teardown below.
+            scrubThumbnails.finishAndUploadIfNeeded()
             NowPlayingCenter.clear()   // drop the Lock Screen / Control Center now-playing on close
             #if os(iOS)
             UIApplication.shared.isIdleTimerDisabled = false  // let the screensaver / auto-lock resume once the player closes
@@ -576,6 +580,11 @@ struct PlayerScreen: View {
                     }
                 }
                 refreshSkipSegments()
+                // Community trickplay: once the duration is known, fetch any shared sprite-sheet for this
+                // exact cut (fail-soft -> the existing local capture). Acts once per title.
+                if d > 0, let m = curMeta {
+                    scrubThumbnails.configureCommunity(imdbId: m.libraryId, season: m.season, episode: m.episode, duration: d)
+                }
             }
         case MPVProperty.seekable:
             // Runtime live-detection: a VOD turns seekable once playback starts, a live feed stays
