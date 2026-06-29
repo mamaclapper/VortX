@@ -59,8 +59,9 @@ struct TVInHeroTrailerView: View {
     /// Set if libmpv reports a load failure: keeps the clip hidden so the still backdrop stays visible
     /// instead of a frozen black surface.
     @State private var failed = false
-    /// Set after the async reachability probe confirms the embedded server is up. The clip is only mounted
-    /// when the server is online (a YouTube `/yt` trailer needs the server to resolve via ytdl-core).
+    /// Gate for mounting the libmpv surface. For a REMOTE url (the `trailer.vortx.tv` resolver or a direct
+    /// CDN stream) this flips true immediately (no embedded server is involved). For a LOOPBACK url (the
+    /// embedded node server) it flips true only after the async reachability probe confirms that server is up.
     @State private var serverReady = false
     /// Gate so the start-delay beat is armed exactly once per mounted URL.
     @State private var startedDelay = false
@@ -70,6 +71,14 @@ struct TVInHeroTrailerView: View {
     private static let startDelay: Duration = .seconds(2.5)
     /// Cross-fade duration for the clip reveal.
     private static let fadeDuration: Double = 0.6
+
+    /// True when the URL points at the on-device embedded server (loopback): those URLs require the
+    /// in-process node server to be up. A remote host (the `trailer.vortx.tv` resolver, a direct CDN
+    /// stream) is NOT loopback and plays without any embedded server. Used to scope the `isOnline()` gate.
+    private static func isLoopback(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        return host == "127.0.0.1" || host == "localhost" || host == "::1"
+    }
 
     var body: some View {
         ZStack {
@@ -95,14 +104,22 @@ struct TVInHeroTrailerView: View {
         // never lingers over B's backdrop.
         .id(url)
         .task(id: url) {
-            // Reset state for the (possibly new) URL, then confirm the server is reachable before mounting.
-            // On a custom/offline server or a slow boot this stays false and the still backdrop holds.
+            // Reset state for the (possibly new) URL, then decide whether to mount the clip.
             serverReady = false
             showClip = false
             didStart = false
             failed = false
             startedDelay = false
-            if await StremioServer.isOnline() {
+            // The `isOnline()` precondition exists only for EMBEDDED-server URLs (the loopback torrent /
+            // proxy node server): those genuinely can't play until that in-process server has booted. A
+            // REMOTE url (the public `trailer.vortx.tv` resolver or a direct CDN trailer stream) needs no
+            // embedded server, so gating it on `isOnline()` wrongly blocked the clip when the user has no /
+            // an offline streaming server. Mount remote URLs straight away and let libmpv's own fetch (and
+            // its `endFileError` -> backdrop fallback) be the only gate; only loopback URLs wait on the
+            // embedded server. (On the Lite build a YouTube resolver URL is remote, so Lite GAINS trailers.)
+            if Self.isLoopback(url) {
+                if await StremioServer.isOnline() { serverReady = true }
+            } else {
                 serverReady = true
             }
         }

@@ -16,12 +16,17 @@ struct TrailerRequest: Identifiable, Equatable {
     /// A non-YouTube `trailerStreams` url, if the meta carried a direct stream.
     let directURL: URL?
 
-    /// The libmpv-playable URL: a direct (non-YouTube) trailer stream, or nil. YouTube trailers are NO
-    /// longer playable through the embedded server's `/yt` route - tokenless InnerTube extraction now
-    /// returns LOGIN_REQUIRED - so a YouTube-only trailer has no playable URL here. iOS/Mac play it through
-    /// the WKWebView IFrame (`YouTubeEmbedView`) using `youTubeID` directly; tvOS (no web view) hides the
-    /// clip/chip when this is nil. That nil-hides-on-tvOS behavior is exactly the old Lite-build path.
-    var playableURL: URL? { directURL }
+    /// The libmpv-playable URL: a direct (non-YouTube) trailer stream when the meta carried one, else the
+    /// public `trailer.vortx.tv/yt/{id}` resolver URL for a YouTube id. The resolver 302-redirects to a
+    /// playable MP4 (libmpv follows the redirect); it is FAIL-SOFT: a 404 / timeout / undeployed resolver
+    /// surfaces to the player as `endFileError`, and every consumer view falls back to the still backdrop on
+    /// that. A direct stream is always preferred over the resolver. This URL is only consumed on tvOS
+    /// (`TVInHeroTrailerView` via the detail `heroTrailerLayer` + `HomeHeroTrailerModel`), which has no web
+    /// view; iOS/Mac ignore this and play YouTube ids through the WKWebView IFrame (`YouTubeEmbedView`) using
+    /// `youTubeID` directly, reading `directURL` (not this) for their own libmpv path.
+    var playableURL: URL? {
+        directURL ?? youTubeID.flatMap { URL(string: "https://trailer.vortx.tv/yt/\($0)") }
+    }
 
     /// The public YouTube watch link, for surfaces that open trailers externally.
     var watchURL: URL? {
