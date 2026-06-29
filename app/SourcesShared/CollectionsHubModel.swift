@@ -345,6 +345,7 @@ final class CollectionsHubModel: ObservableObject {
         GenreSpec("Horror", "moon.stars.fill", hue: 0.0, movie: 27, tv: nil),
         GenreSpec("Animation", "scribble.variable", hue: 0.33, movie: 16, tv: 16),
         GenreSpec("Anime", "star.circle.fill", hue: 0.85, movie: 16, tv: 16, keyword: 210024),
+        GenreSpec("K-Drama", "quote.bubble.fill", hue: 0.93, movie: 18, tv: 18, lang: "ko"),
         GenreSpec("Documentary", "film.fill", hue: 0.48, movie: 99, tv: 99),
         GenreSpec("Romance", "heart.fill", hue: 0.95, movie: 10749, tv: nil),
         GenreSpec("Adventure", "map.fill", hue: 0.09, movie: 12, tv: 10759),
