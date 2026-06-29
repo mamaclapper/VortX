@@ -28,6 +28,22 @@ enum SettingsBackup {
         !skipPrefixes.contains { key.hasPrefix($0) }
     }
 
+    /// PER-DEVICE keys that must NEVER sync or transfer between devices. The cross-device settings sync
+    /// (VortXSyncManager) reuses this serialization as its `doc.settings` blob, so anything excluded here is
+    /// excluded from BOTH the synced blob (makeBackup) and an incoming apply (decodeDomain/restore). Each
+    /// device keeps its own value: the streaming-cache size depends on that device's free storage, and the
+    /// streaming server is per-device (one device may point at a custom/local server). A device that pulls a
+    /// peer's settings keeps its own cache/server choice; its own choice is never pushed up to overwrite others.
+    static let deviceLocalKeys: Set<String> = [
+        "stremiox.diskCacheBytes",   // Settings -> Streaming cache (sized to the device's own storage)
+        "stremiox.serverURL",        // custom streaming server URL (per-device)
+    ]
+
+    /// An app preference that is ALSO safe to sync/transfer (i.e. not a per-device-local key).
+    static func isSyncable(_ key: String) -> Bool {
+        isAppPref(key) && !deviceLocalKeys.contains(key)
+    }
+
     /// 0.4 RENAME SEAM. When VortX renames its `@AppStorage` keys (the `stremiox.` prefix -> `vortx.`,
     /// plus the constant-defined keys), populate these so a backup written by an older StremioX build
     /// still applies. Empty in 0.3.5 (the keys are unchanged). Restore runs every key through
@@ -97,7 +113,7 @@ enum SettingsBackup {
         else {
             throw RestoreError.corruptPayload
         }
-        return pairs.filter { isAppPref($0.key) }
+        return pairs.filter { isSyncable($0.key) }   // never apply a peer's per-device keys (cache size, server URL)
     }
 
     // MARK: App I/O
@@ -113,7 +129,7 @@ enum SettingsBackup {
     static func makeBackup() throws -> Data {
         let bundleID = Bundle.main.bundleIdentifier ?? "unknown"
         let full = UserDefaults.standard.persistentDomain(forName: bundleID) ?? [:]
-        let domain = full.filter { isAppPref($0.key) }
+        let domain = full.filter { isSyncable($0.key) }   // exclude per-device keys (cache size, server URL)
         let app = (Bundle.main.infoDictionary?["CFBundleDisplayName"] as? String) ?? "VortX"
         return try encode(domain: domain, bundleID: bundleID, app: app)
     }
