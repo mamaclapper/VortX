@@ -28,7 +28,7 @@ final class StreamingRailsModel: ObservableObject {
         guard ApiKeys.tmdbKey() != nil else { collections = []; loadedRegion = nil; return }
         guard loadTask == nil, loadedRegion != region else { return }
         loadTask = Task { [weak self] in
-            let built = await Self.fetchAll(region: region)
+            let built = await Self.streamingCollections(region: region)
             guard let self, !Task.isCancelled else { return }
             self.loadTask = nil
             // Keep whatever we had on a fully empty fetch (flaky network) rather than blanking a populated
@@ -48,8 +48,11 @@ final class StreamingRailsModel: ObservableObject {
     }
 
     /// Fetch every streaming-service rail in parallel, preserving `majorStreamingServices` order, dropping
-    /// any service with nothing available in-region. Runs off the main actor.
-    private static func fetchAll(region: String) async -> [CuratedCollection] {
+    /// any service with nothing available in-region. Runs off the main actor. Shared with the nested
+    /// "Streaming" collection group (`HomeGroupsModel`) so the streaming rails are fetched the same way
+    /// whether they render as the flat section or as a group's child rails. Returns [] with no TMDB key.
+    static func streamingCollections(region: String) async -> [CuratedCollection] {
+        guard ApiKeys.tmdbKey() != nil else { return [] }
         let services = TMDBClient.majorStreamingServices
         // Resolve services in small concurrent batches (3 at a time), so the rails don't all fan out their
         // TMDB requests at once on first Home load (each service itself caps its in-flight external_ids).

@@ -12,6 +12,8 @@ struct HomeView: View {
     @StateObject private var releaseCalendar = ReleaseCalendarModel()   // "Upcoming Episodes" from the series library (next 45 days)
     @StateObject private var streaming = StreamingRailsModel()   // browse-by-streaming-service rails (TMDB watch providers)
     @AppStorage("vortx.home.showStreamingRails") private var showStreamingRails = true   // toggle: Netflix/Disney+/... rails (needs a TMDB key)
+    @StateObject private var groups = HomeGroupsModel()   // nested collections: grouped Streaming / Genres / Top New / New rails
+    @AppStorage("vortx.home.showCollectionGroups") private var showCollectionGroups = true   // toggle the whole nested-collection section (mostly TMDB-backed)
     @StateObject private var heroTrailer = HomeHeroTrailerModel()   // #44: focus-settled muted hero trailer
     @AppStorage("stremiox.autoplayTrailers") private var autoplayTrailers = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -75,9 +77,20 @@ struct HomeView: View {
                         // Browse-by-streaming-service rails (Netflix, Disney+, ...): what's on each service
                         // in-region, from TMDB watch providers. Discovery only; cards play through the engine
                         // like any catalog card. Hidden with no TMDB key; each rail drops when empty in-region.
-                        if showStreamingRails {
+                        // Suppressed when the nested-collection section is on, since its "Streaming" GROUP
+                        // (group 1) reproduces these exact rails — showing both would duplicate the rows.
+                        if showStreamingRails && !showCollectionGroups {
                             ForEach(streaming.collections) { collection in
                                 StreamingRow(title: collection.title, items: collection.items, focusModel: focusModel)
+                            }
+                        }
+                        // Nested collections (grouped rails): big group headers (Streaming / Genres / Top New /
+                        // New) each over their child rails, BELOW every flat rail above. Additive + empty-state
+                        // safe — a group with no rails is never built, and the whole section needs (mostly) a
+                        // TMDB key, so with no key + no network this renders nothing and the Home is unchanged.
+                        if showCollectionGroups {
+                            ForEach(groups.groups) { group in
+                                CollectionGroupSection(group: group, focusModel: focusModel)
                             }
                         }
                         if continueWatching.isEmpty && core.boardRows.isEmpty {
@@ -97,8 +110,9 @@ struct HomeView: View {
             }
             .background(Theme.Palette.canvas.ignoresSafeArea())
         }
-        .onAppear { configureMetaSources(); seed(); refreshTopPicks(); refreshReleaseCalendar(); if showStreamingRails { streaming.load() } }
+        .onAppear { configureMetaSources(); seed(); refreshTopPicks(); refreshReleaseCalendar(); if showStreamingRails { streaming.load() }; if showCollectionGroups { groups.load() } }
         .onChange(of: showStreamingRails) { show in if show { streaming.load() } else { streaming.clear() } }
+        .onChange(of: showCollectionGroups) { show in if show { groups.load() } else { groups.clear() } }
         .onChange(of: core.boardRows.first?.id) { seed() }
         .onChange(of: core.continueWatching.first?.id) { seed(); refreshTopPicks() }
         .onChange(of: profiles.activeID) { seed(); refreshTopPicks() }
@@ -268,6 +282,46 @@ struct RailHeader: View {
             Text(title).sectionTitleStyle()
         }
         .padding(.horizontal, Theme.Space.screenEdge)
+    }
+}
+
+/// The BIG header for a nested collection GROUP (Streaming / Genres / Top New / New): reuses `RailHeader`'s
+/// eyebrow + title styling but a visual tier UP — the screen-title font with an accent rule beneath — so a
+/// group reads as a section ABOVE its child rails, distinct from an individual rail's `RailHeader`.
+struct GroupHeader: View {
+    var eyebrow: String? = nil
+    let title: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let eyebrow { Text(eyebrow).eyebrowStyle(Theme.Palette.accent) }
+            Text(title).screenTitleStyle()
+            Rectangle()
+                .fill(Theme.Palette.accent)
+                .frame(width: 64, height: 4)
+                .clipShape(Capsule())
+        }
+        .padding(.horizontal, Theme.Space.screenEdge)
+        .padding(.top, Theme.Space.md)
+    }
+}
+
+/// One nested collection group on tvOS: a `GroupHeader` over its child rails. Each child rail reuses the
+/// existing `StreamingRow` (MetaPreview -> PosterCard -> DetailView routing + the focused-card backdrop),
+/// so a grouped rail behaves identically to the flat streaming/editorial rails. A group with no rails is
+/// never built (see `HomeGroupsModel`), so this always has content.
+struct CollectionGroupSection: View {
+    let group: CollectionGroup
+    var focusModel: FocusedItemModel? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.md) {
+            GroupHeader(eyebrow: group.eyebrow, title: group.title)
+            ForEach(group.rails) { rail in
+                StreamingRow(title: rail.title, items: rail.items, focusModel: focusModel)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

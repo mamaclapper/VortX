@@ -207,6 +207,160 @@ enum TMDBClient {
         return Array(ordered.prefix(limit))
     }
 
+    // MARK: - Nested-collection Home rails (genres, Top New, Just New)
+
+    /// A TMDB genre for a "Genres" Home rail: a stable movie-genre id, an optional matching TV-genre id
+    /// (nil = movies-only for this rail), and a display label. A genre rail blends its movie + TV buckets.
+    /// Order in `homeGenres` is the on-screen order.
+    struct Genre: Identifiable, Hashable {
+        let movieGenreID: Int
+        let tvGenreID: Int?
+        let name: String
+        var id: Int { movieGenreID }
+    }
+
+    /// A handful of broad, populated genres for the "Genres" group, in display order. TMDB splits a few
+    /// genres between movie and TV (Action vs Action & Adventure, Sci-Fi vs Sci-Fi & Fantasy), so each
+    /// carries the matching TV id where it differs; a nil TV id means "movies only for this rail".
+    static let homeGenres: [Genre] = [
+        .init(movieGenreID: 28, tvGenreID: 10759, name: "Action"),       // TV: Action & Adventure
+        .init(movieGenreID: 35, tvGenreID: 35, name: "Comedy"),
+        .init(movieGenreID: 18, tvGenreID: 18, name: "Drama"),
+        .init(movieGenreID: 53, tvGenreID: nil, name: "Thriller"),       // no direct TV genre
+        .init(movieGenreID: 878, tvGenreID: 10765, name: "Sci-Fi"),      // TV: Sci-Fi & Fantasy
+        .init(movieGenreID: 27, tvGenreID: nil, name: "Horror"),
+        .init(movieGenreID: 16, tvGenreID: 16, name: "Animation"),
+        .init(movieGenreID: 10749, tvGenreID: nil, name: "Romance"),
+    ]
+
+    /// "How recent counts as new" for the Top New / Just New groups: titles released within this many
+    /// months back from today. Keeps both groups to genuinely-current releases, not the all-time catalog.
+    static let newWindowMonths = 6
+
+    /// Titles for one genre rail (TMDB /discover by genre, popularity-desc), movie + TV merged, resolved to
+    /// engine-playable Cinemeta (tt) previews. [] with no TMDB key or nothing found; the caller then falls
+    /// back to Cinemeta genre catalogs (which need no key) so the Genres group still fills.
+    static func genreTitles(_ genre: Genre, region: String = deviceRegion, limit: Int = 18) async -> [MetaPreview] {
+        guard let key = ApiKeys.tmdbKey() else { return [] }
+        async let movieRows = discoverGenrePage(media: "movie", genreID: genre.movieGenreID, key: key)
+        // Only fetch a TV bucket for genres that map to a TMDB TV genre (Thriller / Horror / Romance are
+        // movie-only here); otherwise the rail is movies-only.
+        async let tvRows = tvGenrePageIfAvailable(genre.tvGenreID, key: key)
+        return await resolveRows(interleave(await movieRows, await tvRows), key: key, limit: limit)
+    }
+
+    /// The TV discover-by-genre page when a TV genre id exists, else []. Keeps `genreTitles`' `async let`
+    /// clean (a `.map` closure over an async call won't type-check).
+    private static func tvGenrePageIfAvailable(_ tvGenreID: Int?, key: String) async -> [DiscoverRow] {
+        guard let tvGenreID else { return [] }
+        return await discoverGenrePage(media: "tv", genreID: tvGenreID, key: key)
+    }
+
+    /// "Top New": the most popular movies + shows released in the last `newWindowMonths`, merged and
+    /// resolved to tt previews. Sorted by popularity (what's hot right now among recent releases).
+    static func topNewTitles(region: String = deviceRegion, limit: Int = 24) async -> [MetaPreview] {
+        guard let key = ApiKeys.tmdbKey() else { return [] }
+        let (from, to) = newWindow()
+        async let movieRows = discoverRecentPage(media: "movie", sort: "popularity.desc", from: from, to: to, region: region, key: key)
+        async let tvRows = discoverRecentPage(media: "tv", sort: "popularity.desc", from: from, to: to, region: region, key: key)
+        return await resolveRows(interleave(await movieRows, await tvRows), key: key, limit: limit)
+    }
+
+    /// "New": the freshest movies + shows by release / air date (newest first) within the last
+    /// `newWindowMonths`, merged and resolved to tt previews. This is the "just landed" rail.
+    static func justNewTitles(region: String = deviceRegion, limit: Int = 24) async -> [MetaPreview] {
+        guard let key = ApiKeys.tmdbKey() else { return [] }
+        let (from, to) = newWindow()
+        async let movieRows = discoverRecentPage(media: "movie", sort: "primary_release_date.desc", from: from, to: to, region: region, key: key)
+        async let tvRows = discoverRecentPage(media: "tv", sort: "first_air_date.desc", from: from, to: to, region: region, key: key)
+        return await resolveRows(interleave(await movieRows, await tvRows), key: key, limit: limit)
+    }
+
+    /// The (from, to) ISO date strings bounding the "new" window: `newWindowMonths` ago through today, so a
+    /// "release date desc" sort can't surface far-future scheduled titles with no real release yet.
+    private static func newWindow() -> (from: String, to: String) {
+        let now = Date()
+        let from = Calendar.current.date(byAdding: .month, value: -newWindowMonths, to: now) ?? now
+        let fmt = DateFormatter()
+        fmt.calendar = Calendar(identifier: .iso8601)
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        fmt.dateFormat = "yyyy-MM-dd"
+        return (fmt.string(from: from), fmt.string(from: now))
+    }
+
+    /// Interleave two already-ordered row lists (movie + tv) so a rail blends both, movie-first per pair.
+    private static func interleave(_ a: [DiscoverRow], _ b: [DiscoverRow]) -> [DiscoverRow] {
+        var rows: [DiscoverRow] = []
+        for i in 0..<max(a.count, b.count) {
+            if i < a.count { rows.append(a[i]) }
+            if i < b.count { rows.append(b[i]) }
+        }
+        return rows
+    }
+
+    /// Resolve discover rows to engine-playable tt previews: over-fetch (some drop for a missing IMDb id),
+    /// resolve each tmdb id -> tt in CAPPED chunks (~6 in flight) so several rails don't burst hundreds of
+    /// concurrent requests at TMDB (429s silently thin rails), preserve order, de-dup, and cap at `limit`.
+    /// This is the exact resolve path `streamingProviderTitles` uses, factored out for the new rails.
+    private static func resolveRows(_ rows: [DiscoverRow], key: String, limit: Int) async -> [MetaPreview] {
+        let slice = Array(rows.prefix(limit * 2))
+        var resolved: [(Int, MetaPreview)] = []
+        for start in stride(from: 0, to: slice.count, by: 6) {
+            if resolved.count >= limit { break }
+            let batch = Array(slice[start..<min(start + 6, slice.count)])
+            let part: [(Int, MetaPreview)] = await withTaskGroup(of: (Int, MetaPreview)?.self) { group in
+                for (offset, row) in batch.enumerated() {
+                    let i = start + offset
+                    group.addTask {
+                        guard let ext = await get("/\(row.media)/\(row.tmdbID)/external_ids?api_key=\(key)"),
+                              let imdb = ext["imdb_id"] as? String, imdb.hasPrefix("tt"),
+                              row.poster?.isEmpty == false else { return nil }
+                        let type = row.media == "tv" ? "series" : "movie"
+                        return (i, MetaPreview(id: imdb, type: type, name: row.name, poster: row.poster, posterShape: nil, popularity: nil))
+                    }
+                }
+                var out: [(Int, MetaPreview)] = []
+                for await r in group { if let r { out.append(r) } }
+                return out
+            }
+            resolved.append(contentsOf: part)
+        }
+        var seen = Set<String>()
+        let ordered = resolved.sorted { $0.0 < $1.0 }.map(\.1).filter { seen.insert($0.id).inserted }
+        return Array(ordered.prefix(limit))
+    }
+
+    /// A discover-result row, shared by the genre / recent / provider pages: (tmdb id, media, title, poster).
+    private typealias DiscoverRow = (tmdbID: Int, media: String, name: String, poster: String?)
+
+    /// One TMDB discover-by-genre page, popularity-desc, US-English titles.
+    private static func discoverGenrePage(media: String, genreID: Int, key: String) async -> [DiscoverRow] {
+        let path = "/discover/\(media)?api_key=\(key)&with_genres=\(genreID)"
+            + "&sort_by=popularity.desc&vote_count.gte=50&language=en-US&page=1"
+        return parseDiscover(await get(path), media: media)
+    }
+
+    /// One TMDB discover page bounded by a release/air-date window, with the given sort (popularity for Top
+    /// New, release-date for Just New). The date field differs by media (`primary_release_date` vs
+    /// `first_air_date`), so bound on the matching `.gte`/`.lte` for each.
+    private static func discoverRecentPage(media: String, sort: String, from: String, to: String, region: String, key: String) async -> [DiscoverRow] {
+        let dateField = media == "tv" ? "first_air_date" : "primary_release_date"
+        let path = "/discover/\(media)?api_key=\(key)&sort_by=\(sort)&\(dateField).gte=\(from)&\(dateField).lte=\(to)"
+            + "&vote_count.gte=20&watch_region=\(region)&language=en-US&page=1"
+        return parseDiscover(await get(path), media: media)
+    }
+
+    /// Decode a TMDB discover/results payload into `DiscoverRow`s (id + title/name + poster).
+    private static func parseDiscover(_ obj: [String: Any]?, media: String) -> [DiscoverRow] {
+        guard let obj, let results = obj["results"] as? [[String: Any]] else { return [] }
+        return results.compactMap { r in
+            guard let id = r["id"] as? Int else { return nil }
+            let name = (r["title"] as? String) ?? (r["name"] as? String) ?? ""
+            let poster = (r["poster_path"] as? String).map { "https://image.tmdb.org/t/p/w342\($0)" }
+            return (id, media, name, poster)
+        }
+    }
+
     /// One TMDB discover-by-provider page: (tmdb id, media, title, poster URL) rows, flatrate + most popular.
     private static func discoverProviderPage(media: String, providerID: Int, region: String, key: String)
         async -> [(tmdbID: Int, media: String, name: String, poster: String?)] {
