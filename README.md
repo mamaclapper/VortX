@@ -322,6 +322,7 @@ This is an independent community project. It is not affiliated with or endorsed 
 - [nodejs-mobile](https://github.com/nodejs-mobile/nodejs-mobile), for the embedded server runtime.
 - Claude (Anthropic) wrote the code.
 - [OrigamiSpace](https://github.com/OrigamiSpace), the first and most prolific community contributor: QR sign-in, live stream playback, live search, the Resume/Play hero and watched-state controls, the tab bar and focus fixes on real hardware, verified CI release builds, the Direct Links Only mode and the VortX Lite build, the stream-ranking reports that drove the cached-first fixes, the build-from-source report that made a fresh clone work for everyone, and the Apple TV search-suggestion interleaving.
+- **[SkipDB](https://skipdb.tv)**, the open, community-built skip-segment database, also created by [OrigamiSpace](https://github.com/OrigamiSpace). VortX's skip feature is built on it: we read from it, contribute every submission back to it, and publish our own skip data openly under the same [Open Database License](https://opendatacommons.org/licenses/odbl/) at [skip.vortx.tv/dump](https://skip.vortx.tv/dump). Open projects like this are why the ecosystem works, and VortX is proud to give back to it.
 
 See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for the full list.
 
