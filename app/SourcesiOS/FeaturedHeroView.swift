@@ -114,6 +114,7 @@ struct FeaturedHeroView: View {
         // rest of the wide macOS band stayed bare scrim — the "backdrop only fills part of the band" report.
         // (On the narrow iPhone the image width happened to exceed the band, so the gap never showed.)
         GeometryReader { geo in
+            KenBurnsArt {
             ZStack {
                 // Poster fallback layer: a slow or failed backdrop request must never leave a flat black
                 // band (the iPhone "no backdrop" report — AsyncImage fell straight to the black canvas on
@@ -133,6 +134,7 @@ struct FeaturedHeroView: View {
                     default: Color.clear   // transparent while loading / on failure so the poster shows through
                     }
                 }
+            }
             }
             .frame(width: geo.size.width, height: geo.size.height)
             .clipped()
@@ -269,6 +271,26 @@ struct FeaturedHeroView: View {
             }
             .buttonStyle(ChipButtonStyle())
         }
+    }
+}
+
+/// A still backdrop that slowly pans + zooms (Ken Burns) so the hero band is never static when no muted
+/// clip is playing (Lite build, no trailer, or while the /clip mp4 is still warming). Local `@State` plus
+/// the parent's per-title `.id` on the backdrop means each new featured title restarts the pan from
+/// neutral. Fully gated off under Reduce Motion. The host frame + `.clipped()` keep the drift inside the
+/// band (scale >= 1.05 so the offset never bares an edge). Compositor-only (transform/opacity) per the
+/// motion rules — never animates layout.
+private struct KenBurnsArt<Content: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var active = false
+    private let content: Content
+    init(@ViewBuilder _ content: () -> Content) { self.content = content() }
+    var body: some View {
+        content
+            .scaleEffect(active ? 1.08 : 1.0, anchor: .center)
+            .offset(x: active ? 12 : -12, y: active ? 8 : -8)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 18).repeatForever(autoreverses: true), value: active)
+            .onAppear { if !reduceMotion { active = true } }
     }
 }
 
