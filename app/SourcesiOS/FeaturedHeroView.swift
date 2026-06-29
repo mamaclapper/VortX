@@ -92,7 +92,13 @@ struct FeaturedHeroView: View {
            let yt = hero.trailerYouTubeID, !yt.isEmpty {
             // Home billboard = the muted, looping trailer through the WKWebView IFrame (tokenless /yt extraction
             // is dead). Non-interactive so it stays ambient; the still backdrop underneath is the fallback.
-            YouTubeEmbedView(youTubeID: yt, mode: .background)
+            YouTubeEmbedView(youTubeID: yt, mode: .background, onFailure: {
+                // A failed embed (owner disabled embedding, removed/private video, or the 151/152/153
+                // embedder-verification family) just falls back to the still backdrop underneath. Log it
+                // for on-device diagnosis but do NOT retry or re-pick: re-triggering is what caused the
+                // YouTube-153 flicker / retry-storm. The clip stays gone until the hero rotates.
+                NSLog("[Hero] trailer embed failed for yt=\(yt) — falling back to still backdrop")
+            })
                 .frame(height: heroHeight).clipped().allowsHitTesting(false)
                 .id("hero-clip-\(hero.id)")    // reload the clip for each new featured item / rotation
                 .transition(reduceMotion ? .identity : .opacity)
@@ -198,7 +204,10 @@ struct FeaturedHeroView: View {
     @ViewBuilder private func titleOrLogo(_ hero: FeaturedHeroItem) -> some View {
         // fanart.tv clearlogo first (when enabled), else the ERDB-aware add-on/metahub logo, else serif text.
         // The shared component is used by tvOS + the detail pages too, so the logo behaves identically everywhere.
-        ResolvedTitleLogo(id: hero.id, type: hero.type, fallbackLogo: hero.logo,
+        // Prefer the imdb id (behaviorHints.defaultVideoId) when enrichment surfaced one: a TMDB/Kitsu catalog
+        // title's `id` is tmdb:/kitsu: which fanart.tv/ERDB can't map, so the logo only resolves off the imdb
+        // id (mirrors iOSDetailView's `meta.behaviorHints?.defaultVideoId ?? meta.id`).
+        ResolvedTitleLogo(id: hero.defaultVideoId ?? hero.id, type: hero.type, fallbackLogo: hero.logo,
                           maxWidth: 320, maxHeight: 110, accessibilityName: hero.name) {
             heroTitle(hero)
         }

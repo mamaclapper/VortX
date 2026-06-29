@@ -278,6 +278,12 @@ struct FeaturedHeroItem: Identifiable, Equatable, Hashable {
     /// The first trailer's YouTube id, surfaced by enrichment. Nil until (and unless) a fetched meta
     /// carries a trailer; drives the hero's Trailer chip.
     let trailerYouTubeID: String?
+    /// The title's canonical imdb id (`behaviorHints.defaultVideoId`), surfaced by enrichment. For a
+    /// TMDB/Kitsu catalog title the `id` is tmdb:/kitsu: which fanart.tv/ERDB can't map, so the hero
+    /// logo never resolves; the imdb id here is what lets `ResolvedTitleLogo` find a logo (mirrors the
+    /// detail page's `meta.behaviorHints?.defaultVideoId ?? meta.id`). Nil on the seed-grade item (the
+    /// catalog/CW/rail source types don't carry behaviorHints) until enrichment fills it in.
+    let defaultVideoId: String?
 
     /// Standard Stremio 16:9 background art for an IMDB-identified title (mirrors the tvOS helper).
     static func metahubBackground(forId id: String) -> String? {
@@ -303,7 +309,9 @@ struct FeaturedHeroItem: Identifiable, Equatable, Hashable {
             backdrop: meta.background ?? metahubBackground(forId: meta.id) ?? meta.poster,
             logo: metahubLogo(forId: meta.id), description: meta.description, releaseInfo: meta.releaseInfo,
             runtime: nil, imdbRating: meta.imdbRating, genres: meta.genres ?? [],
-            trailerYouTubeID: nil)
+            // CoreMeta (a catalog preview) carries no behaviorHints, so the imdb id is nil until
+            // enrichment fills it in from the fetched meta.
+            trailerYouTubeID: nil, defaultVideoId: nil)
     }
 
     /// Seed from a Continue Watching / library entry, which carries only a poster: real 16:9 art comes
@@ -315,7 +323,9 @@ struct FeaturedHeroItem: Identifiable, Equatable, Hashable {
             backdrop: metahubBackground(forId: cw.id) ?? cw.poster,
             logo: metahubLogo(forId: cw.id), description: nil, releaseInfo: nil,
             runtime: nil, imdbRating: nil, genres: [],
-            trailerYouTubeID: nil)
+            // CoreCWItem (a library entry) carries no behaviorHints, so the imdb id is nil until
+            // enrichment fills it in from the fetched meta.
+            trailerYouTubeID: nil, defaultVideoId: nil)
     }
 
     /// Build from the lightweight `RailItem` carried through the rails/grid (so the hero can seed
@@ -326,7 +336,9 @@ struct FeaturedHeroItem: Identifiable, Equatable, Hashable {
             backdrop: rail.background ?? metahubBackground(forId: rail.id) ?? rail.poster,
             logo: metahubLogo(forId: rail.id), description: rail.description, releaseInfo: rail.releaseInfo,
             runtime: nil, imdbRating: rail.imdbRating, genres: rail.genres ?? [],
-            trailerYouTubeID: nil)
+            // RailItem carries no behaviorHints, so the imdb id is nil until enrichment fills it in
+            // from the fetched meta.
+            trailerYouTubeID: nil, defaultVideoId: nil)
     }
 
     /// Return a copy upgraded with a fetched add-on meta response (keeps existing seed values when the
@@ -341,7 +353,8 @@ struct FeaturedHeroItem: Identifiable, Equatable, Hashable {
             runtime: meta.runtime ?? runtime,
             imdbRating: meta.imdbRating ?? imdbRating,
             genres: (meta.genres?.isEmpty == false) ? meta.genres! : genres,
-            trailerYouTubeID: meta.trailerYouTubeID ?? trailerYouTubeID)
+            trailerYouTubeID: meta.trailerYouTubeID ?? trailerYouTubeID,
+            defaultVideoId: meta.defaultVideoId ?? defaultVideoId)
     }
 }
 
@@ -361,16 +374,30 @@ struct AddonMetaResponse: Decodable {
         let genres: [String]?
         let logo: String?
         let trailerStreams: [TrailerStream]?
+        /// Meta-level `behaviorHints`; carries `defaultVideoId` (the imdb id for a tmdb:/kitsu: title),
+        /// which the hero needs so `ResolvedTitleLogo` can map a logo for a non-IMDb catalog title.
+        let behaviorHints: BehaviorHints?
 
         /// First trailer's YouTube id, if the meta carries one (`trailerStreams[].ytId`).
         var trailerYouTubeID: String? {
             (trailerStreams ?? []).compactMap(\.ytId).first { !$0.isEmpty }
+        }
+
+        /// The title's canonical imdb id (`behaviorHints.defaultVideoId`), when the fetched meta carries it.
+        var defaultVideoId: String? {
+            guard let id = behaviorHints?.defaultVideoId, !id.isEmpty else { return nil }
+            return id
         }
     }
 
     /// A single trailer stream entry; we only read its YouTube id.
     struct TrailerStream: Decodable {
         let ytId: String?
+    }
+
+    /// Meta-level `behaviorHints` — only `defaultVideoId` (the imdb id for a tmdb:/kitsu: title) is read.
+    struct BehaviorHints: Decodable {
+        let defaultVideoId: String?
     }
 
     let meta: Meta?
