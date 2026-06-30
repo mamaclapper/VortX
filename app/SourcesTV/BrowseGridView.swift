@@ -66,7 +66,7 @@ struct DiscoverCardTile: View {
             LinearGradient(colors: list.gradient, startPoint: .topLeading, endPoint: .bottomTrailing)
             Image(systemName: list.symbol)
                 .font(.system(size: 40, weight: .bold))
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(Theme.Palette.accent.opacity(list.accentOpacity))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 .padding(Theme.Space.lg)
             VStack(alignment: .leading, spacing: 4) {
@@ -85,24 +85,19 @@ struct DiscoverCardTile: View {
 struct TVServiceTile: View {
     let provider: TMDBClient.ProviderTile
     var body: some View {
-        VStack(spacing: Theme.Space.sm) {
-            ZStack {
-                Theme.Palette.surface2
-                if provider.logoURL != nil {
-                    // Tight padding so the (square) provider logo fills most of the tile instead of reading as
-                    // a tiny centered icon. The .fit logo is height-bound in this wide tile, so the vertical
-                    // padding is what governs its size - keep it small.
-                    RemoteLogo(url: provider.logoURL).padding(.horizontal, Theme.Space.md).padding(.vertical, Theme.Space.sm)
-                } else {
-                    Text(provider.name).font(.system(size: 20, weight: .bold)).foregroundStyle(Theme.Palette.textPrimary)
-                        .multilineTextAlignment(.center).padding(Theme.Space.sm)
-                }
+        // A FULL tile at Discover-card size with NO caption underneath: the logo fills the tile so it reads as
+        // a branded card, not a tiny icon in a grey box (matches the iOS hub).
+        ZStack {
+            Theme.Palette.surface2
+            if provider.logoURL != nil {
+                RemoteLogo(url: provider.logoURL).padding(.horizontal, Theme.Space.xl).padding(.vertical, Theme.Space.lg)
+            } else {
+                Text(provider.name).font(.system(size: 24, weight: .bold)).foregroundStyle(Theme.Palette.textPrimary)
+                    .multilineTextAlignment(.center).padding(Theme.Space.md)
             }
-            .frame(width: kHubTileWidth, height: kHubTileWidth * 0.6)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-            Text(provider.name).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.Palette.textSecondary).lineLimit(1)
         }
-        .frame(width: kHubTileWidth)
+        .frame(width: kHubCardWidth, height: kHubCardWidth * 0.52)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
     }
 }
 
@@ -123,7 +118,7 @@ struct TVGenreTile: View {
             .shadow(color: .black.opacity(0.5), radius: 3, y: 1)
             .padding(Theme.Space.md)
         }
-        .frame(width: kHubTileWidth, height: kHubTileWidth * 0.6)
+        .frame(width: kHubCardWidth, height: kHubCardWidth * 0.52)
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
     }
 }

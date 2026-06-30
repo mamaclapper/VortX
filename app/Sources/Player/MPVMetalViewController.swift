@@ -267,6 +267,10 @@ final class MPVMetalViewController: PlatformViewController {
             // intrinsic max BEFORE opting into multichannel content, so it reflects the route itself.
             let intrinsicMaxChannels = session.maximumOutputNumberOfChannels
             NSLog("[#78 audio] route=\(outputPortType?.rawValue ?? "nil") maxOutChannels=\(intrinsicMaxChannels) sampleRate=\(session.sampleRate)")
+            // #78: feed the route's OWN rate back as the preferred rate so the AudioUnit opens at a rate the
+            // locked Atmos/eARC route actually accepts (a hint the OS clamps; on every other route the session
+            // already reports its native rate, so this is a no-op there).
+            if session.sampleRate >= 8000 { try? session.setPreferredSampleRate(session.sampleRate) }
             // #88 / #78: advertise multichannel content ONLY on routes that can actually OPEN a multichannel
             // layout. AirPods take a system head-tracked Spatial Audio layout. For wired/receiver routes we
             // now drive this off the route's OWN reported capability (intrinsic max > 2) instead of trusting
@@ -302,8 +306,18 @@ final class MPVMetalViewController: PlatformViewController {
         // route, or the AO opens onto a layout/rate it can't drive and goes silent (#78).
         if routeIsStereoOnly { return Int(outputSampleRate.rounded()) }
         #endif
+        #if os(tvOS)
+        // #78: ALWAYS force the route's native rate on tvOS HDMI. ao_audiounit does NOT resample to the route,
+        // so on a >2ch Atmos / Best-Available route, leaving mpv on the decoded content rate makes the AudioUnit
+        // open at a rate the locked eARC link rejects -> the AO never opens -> tvOS swaps in the null AO ->
+        // dead silence (silent EVEN at Stereo, because the old `outputChannels <= 2` gate keyed on the ROUTE's
+        // channel count, not the user's mode). Pinning mpv's resampler to the route rate makes the AO open; the
+        // decoded channel LAYOUT is untouched (only the clock is pinned), so a working receiver is unaffected.
+        return Int(outputSampleRate.rounded())
+        #else
         guard outputChannels <= 2 else { return nil }
         return Int(outputSampleRate.rounded())
+        #endif
     }
 
     func setupMpv() {
@@ -472,11 +486,11 @@ final class MPVMetalViewController: PlatformViewController {
         // dead player. This is the lowest-risk mitigation; it does not change a route where the AO opens
         // fine (working 5.1 / stereo keep their audio). iOS/macOS keep `no` on a real external route so a
         // soundbar mis-negotiation still surfaces as a diagnosable log rather than silently dropping audio.
-        #if os(tvOS)
-        let fallbackToNull = "yes"
-        #else
+        // #78: do NOT blanket-null on tvOS. With the route rate now FORCED (sampleRatePolicy), the AO opens on
+        // the Atmos/eARC route; the null AO is reserved for routes that genuinely can't open (built-in speakers
+        // / AirPlay, caught by routeIsStereoOnly). Keeping "no" on the HDMI path lets a residual open failure
+        // surface in the log instead of silently dropping to no-audio (the exact #78 failure mode).
         let fallbackToNull = routeIsStereoOnly ? "yes" : "no"
-        #endif
         checkError(mpv_set_option_string(mpv, "audio-fallback-to-null", fallbackToNull))
         // THE soundbar fix: resample to the route's actual rate so a rate mismatch over a fixed-rate
         // HDMI-ARC link can't drop to silence (mpv's audiounit AO does not resample to the route).

@@ -381,8 +381,12 @@ struct iOSDetailView: View {
         let req = TrailerRequest.from(meta: m)
         // Direct stream plays in libmpv; a YouTube id plays in the IFrame cover (tokenless /yt extraction is
         // dead). The id comes from the engine meta or the Cinemeta/TMDB fallback (resolvedTrailerID).
-        if let direct = req?.directURL {
-            presentation = .trailerPlayer(url: direct, title: title)
+        // Native libmpv FIRST: a direct stream, else the /clip resolver mp4 (the same in-app path tvOS uses).
+        // The WKWebView IFrame is the LAST resort only - its 151/152/153 embed failure fail-softs to a browser
+        // (the "Trailer flashes a YouTube error then opens Safari" report). A down /clip backend now shows an
+        // in-app "Trailer unavailable", never the browser.
+        if let url = req?.directURL ?? req?.playableURL {
+            presentation = .trailerPlayer(url: url, title: title)
         } else if let yt = req?.youTubeID ?? resolvedTrailerID, !yt.isEmpty {
             presentation = .trailerEmbed(youTubeID: yt, title: title)
         }
@@ -503,7 +507,7 @@ struct iOSDetailView: View {
             // Movies carry a 16:9 `background`, so .fill crops cleanly. A SERIES usually has no landscape
             // background and falls back to the PORTRAIT `poster`; .fill on that in the landscape band crops
             // it to black bars (the "shows all have cut off hero image" report), so series fit instead.
-            case .success(let img): img.resizable().aspectRatio(contentMode: type == "series" ? .fit : .fill)
+            case .success(let img): img.resizable().aspectRatio(contentMode: (type == "series" && (meta?.background?.isEmpty ?? true)) ? .fit : .fill)
             default: Theme.Palette.surface1
             }
         }

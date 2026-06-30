@@ -42,13 +42,16 @@ enum DiscoverList: String, CaseIterable, Hashable {
         case .upcoming: return "calendar"
         }
     }
-    /// Two-stop gradient (mirrors the reference: trending purple, popular amber, latest teal, upcoming rose).
-    var gradient: [Color] {
+    /// Warm-neutral surface gradient: the four cards are distinguished by their symbol + an accent STEP, not
+    /// by hue, so the hub reads as VortX's own dark-ember identity rather than the rainbow-card reference.
+    var gradient: [Color] { [Theme.Palette.surface2, Theme.Palette.surface1] }
+    /// Accent intensity that separates the four cards without colour (trending strongest -> upcoming softest).
+    var accentOpacity: Double {
         switch self {
-        case .trending: return [Color(red: 0.45, green: 0.31, blue: 0.85), Color(red: 0.27, green: 0.42, blue: 0.92)]
-        case .popular:  return [Color(red: 0.92, green: 0.52, blue: 0.16), Color(red: 0.86, green: 0.31, blue: 0.27)]
-        case .latest:   return [Color(red: 0.13, green: 0.62, blue: 0.62), Color(red: 0.18, green: 0.52, blue: 0.40)]
-        case .upcoming: return [Color(red: 0.86, green: 0.27, blue: 0.45), Color(red: 0.62, green: 0.20, blue: 0.55)]
+        case .trending: return 1.0
+        case .popular:  return 0.78
+        case .latest:   return 0.58
+        case .upcoming: return 0.42
         }
     }
 }
@@ -72,7 +75,7 @@ struct GenreSpec: Hashable {
         self.movieGenreID = movie; self.tvGenreID = tv; self.keyword = keyword; self.originLang = lang
     }
 
-    var tint: Color { Color(hue: hue, saturation: 0.55, brightness: 0.78) }
+    var tint: Color { Theme.Palette.accent }   // ember accent, not a per-genre rainbow hue (VortX identity)
 }
 
 // MARK: - Hub target (what a tile points at)

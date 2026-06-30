@@ -958,6 +958,7 @@ struct DownloadsView: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(Theme.Palette.textSecondary)
                 .frame(width: 34, height: 34)
+                .contentShape(Rectangle())   // hit-test the full 34x34 box, not the glyph silhouette (the Mac/iOS dead-zone that ate Play/Delete taps)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
@@ -1220,17 +1221,15 @@ struct iOSDiscoverView: View {
                 // on the cross axis — it always takes the full viewport width — so it can't overflow.
                 // Home already uses LazyVStack and never exhibited the shift.
                 LazyVStack(alignment: .leading, spacing: Theme.Space.md) {
+                    // Hero leads UNCONDITIONALLY (like Home) so Discover ALWAYS has its persistent cinematic
+                    // header, even before the catalog loads — the regression where it was gated behind
+                    // `if let discover` meant Discover showed NO hero until a catalog arrived. The model
+                    // tolerates an empty pool and re-seeds on addons/revision (onChange handlers below).
+                    FeaturedHeroView(model: hero, onOpen: { path.append($0) })
+                    if showCollectionsHub, CollectionsHubModel.isAvailable {
+                        iOSCollectionsHub(model: collectionsHub)
+                    }
                     if let discover = core.discover {
-                        // Hero is an ambient billboard scroll-header above the chips + grid, shown once
-                        // a catalog has loaded; its Play / Trailer buttons stay tappable. It fades
-                        // cleanly into the chip rows below — no negative overlap, so the filter pills
-                        // no longer ride up into the hero's title/synopsis band (#52, #7).
-                        FeaturedHeroView(model: hero, onOpen: { path.append($0) })
-                        // Collections hub BELOW the hero (owner: the hero is the hero, not in second place;
-                        // categories go down like on Home) so the cinematic billboard leads and is not shrunk.
-                        if showCollectionsHub, CollectionsHubModel.isAvailable {
-                            iOSCollectionsHub(model: collectionsHub)
-                        }
                         // The filter rows are their own vertically-stacked band: each chip row gets its
                         // own line with consistent spacing so a row's pills can never be drawn on top
                         // of the row above it (#7).

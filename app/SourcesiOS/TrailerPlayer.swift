@@ -61,13 +61,10 @@ struct TrailerEmbedCover: View {
         }
     }
 
-    /// The embed reported it cannot play (the owner disabled embedding, or the video was removed). Rather
-    /// than leave YouTube's "unavailable" card on screen, hand the trailer off to the system (YouTube app
-    /// or browser) where the same video plays unrestricted, then dismiss the cover.
+    /// The embed reported it cannot play. NEVER hand off to a browser - that is the "Trailer flashes a YouTube
+    /// error then Safari opens" report. The in-app trailer must stay in-app: just dismiss the cover, the detail
+    /// page keeps its still backdrop. The native libmpv /clip path (preferred in playTrailer) is the real source.
     private func openOnYouTube() {
-        if let url = URL(string: "https://www.youtube.com/watch?v=\(youTubeID)") {
-            TrailerOpener.open(url)
-        }
         onClose()
     }
 }

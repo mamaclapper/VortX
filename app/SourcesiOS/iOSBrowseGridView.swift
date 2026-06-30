@@ -47,8 +47,9 @@ struct iOSCollectionsHub: View {
 
 // MARK: - Tiles
 
+// One pill size everywhere: the streaming + genre tiles match the Discover card (the owner's reference size),
+// instead of the old half-width tiles that read as tiny icons.
 private let kiOSCardWidth: CGFloat = 224
-private let kiOSTileWidth: CGFloat = 116
 
 struct iOSDiscoverCard: View {
     let list: DiscoverList
@@ -56,7 +57,7 @@ struct iOSDiscoverCard: View {
         ZStack(alignment: .bottomLeading) {
             LinearGradient(colors: list.gradient, startPoint: .topLeading, endPoint: .bottomTrailing)
             Image(systemName: list.symbol)
-                .font(.system(size: 22, weight: .bold)).foregroundStyle(.white.opacity(0.9))
+                .font(.system(size: 22, weight: .bold)).foregroundStyle(Theme.Palette.accent.opacity(list.accentOpacity))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing).padding(Theme.Space.md)
             VStack(alignment: .leading, spacing: 2) {
                 Text(list.title).font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
@@ -72,24 +73,20 @@ struct iOSDiscoverCard: View {
 struct iOSServiceTile: View {
     let provider: TMDBClient.ProviderTile
     var body: some View {
-        VStack(spacing: Theme.Space.xs) {
-            ZStack {
-                Theme.Palette.surface2
-                if let logo = provider.logoURL, let url = URL(string: logo) {
-                    // Tight padding so the (square) provider logo fills the tile instead of reading as a tiny
-                    // centered icon; the .fit logo is height-bound here, so small vertical padding = bigger logo.
-                    AsyncImage(url: url) { img in img.resizable().aspectRatio(contentMode: .fit) } placeholder: { Color.clear }
-                        .padding(.horizontal, 6).padding(.vertical, 4)
-                } else {
-                    Text(provider.name).font(.system(size: 13, weight: .bold)).foregroundStyle(Theme.Palette.textPrimary)
-                        .multilineTextAlignment(.center).padding(4)
-                }
+        // A FULL pill at Discover-card size, with NO caption underneath: the logo fills the pill so it reads as
+        // a branded tile (Nuvio-style), not a tiny centered icon stranded in a grey box.
+        ZStack {
+            Theme.Palette.surface2
+            if let logo = provider.logoURL, let url = URL(string: logo) {
+                AsyncImage(url: url) { img in img.resizable().aspectRatio(contentMode: .fit) } placeholder: { Color.clear }
+                    .padding(.horizontal, 28).padding(.vertical, 22)
+            } else {
+                Text(provider.name).font(.system(size: 18, weight: .bold)).foregroundStyle(Theme.Palette.textPrimary)
+                    .multilineTextAlignment(.center).padding(10)
             }
-            .frame(width: kiOSTileWidth, height: kiOSTileWidth * 0.62)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-            Text(provider.name).font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.Palette.textSecondary)
-                .lineLimit(1).frame(width: kiOSTileWidth)
         }
+        .frame(width: kiOSCardWidth, height: kiOSCardWidth * 0.5)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
     }
 }
 
@@ -103,14 +100,14 @@ struct iOSGenreTile: View {
                 AsyncImage(url: url) { img in img.resizable().aspectRatio(contentMode: .fill) } placeholder: { Color.clear }
             }
             LinearGradient(colors: [.black.opacity(0.0), .black.opacity(0.2), .black.opacity(0.7)], startPoint: .top, endPoint: .bottom)
-            HStack(spacing: 5) {
-                Image(systemName: genre.symbol).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white)
-                Text(genre.title).font(.system(size: 12, weight: .bold)).foregroundStyle(.white).lineLimit(1)
+            HStack(spacing: 6) {
+                Image(systemName: genre.symbol).font(.system(size: 15, weight: .semibold)).foregroundStyle(.white)
+                Text(genre.title).font(.system(size: 15, weight: .bold)).foregroundStyle(.white).lineLimit(1)
             }
             .shadow(color: .black.opacity(0.5), radius: 2, y: 1)
-            .padding(7)
+            .padding(10)
         }
-        .frame(width: kiOSTileWidth, height: kiOSTileWidth * 0.62)
+        .frame(width: kiOSCardWidth, height: kiOSCardWidth * 0.5)
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
     }
 }
