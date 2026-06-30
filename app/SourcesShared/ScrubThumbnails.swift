@@ -38,7 +38,10 @@ final class ScrubThumbnailsStore: ObservableObject {
     private var communitySrcHeight = 0
     /// Raw JPEG frames captured THIS session, time-ordered build input for the upload sprite-sheet.
     private var sessionFrames: [CommunityTrickplay.CapturedFrame] = []
-    private var didUpload = false
+    /// Frame count at the last upload. Throttles progressive re-uploads and lets the teardown flush skip a
+    /// re-send when no new coverage arrived. Replaces the old one-shot `didUpload` (which lost everything to a
+    /// missing teardown).
+    private var lastUploadedCount = 0
     /// Capture cadence the local pipeline records at (~every 10s); also the sheet/vtt tile interval.
     private static let captureInterval: Double = 10
 
@@ -51,7 +54,7 @@ final class ScrubThumbnailsStore: ObservableObject {
         communityAlreadyExists = false
         communityKey = nil
         sessionFrames = []
-        didUpload = false
+        lastUploadedCount = 0
     }
 
     /// Plumb the shareable identity + kick off the L1 community fetch. Call ONCE per title after the duration
@@ -60,7 +63,15 @@ final class ScrubThumbnailsStore: ObservableObject {
     func configureCommunity(imdbId: String?, season: Int?, episode: Int?, duration: Double, enabled: Bool = CommunityTrickplay.isEnabled) {
         guard enabled, communityKey == nil, let imdbId,
               let key = CommunityTrickplay.contentKey(imdbId: imdbId, season: season, episode: episode, duration: duration)
-        else { return }
+        else {
+            // Diagnose an empty server table: log WHY we never key (the usual culprit is a non-`tt` libraryId,
+            // e.g. a tmdb:/kitsu: id, so contentKey returns nil and nothing is ever captured for upload).
+            if enabled, communityKey == nil {
+                NSLog("[trickplay] community NOT keyed (need a tt-imdb id + duration): imdb=%@ dur=%.0f", imdbId ?? "nil", duration)
+            }
+            return
+        }
+        NSLog("[trickplay] community keyed: %@ (imdb=%@)", key, imdbId)
         communityKey = key
         communityImdb = imdbId
         communitySeason = season
@@ -114,25 +125,48 @@ final class ScrubThumbnailsStore: ObservableObject {
         // Keep the raw JPEG for a possible community upload (bounded; the worker caps at 600 tiles anyway).
         if communityKey != nil, !communityAlreadyExists, sessionFrames.count < 600 {
             sessionFrames.append(CommunityTrickplay.CapturedFrame(time: time, jpeg: data))
+            maybeUploadProgressively()   // upload DURING playback, not only at a teardown that may never fire
         }
     }
 
-    /// After playback (teardown / leaving the title), pack this session's locally captured frames into a
-    /// sprite-sheet and UPLOAD it (first-writer-wins). No-op when: disabled, the community already had a set,
-    /// no shareable key, too few frames, or already uploaded. Runs fully off the main actor and never blocks.
+    /// Upload DURING playback so trickplay is never lost to a missing teardown (movie ends -> home, sleep,
+    /// auto-advance, or jetsam all skip the teardown flush below). Pushes once we have a useful set (~5 min in)
+    /// then again as coverage roughly doubles; the worker is overwrite-wins, so the fullest capture survives.
+    private func maybeUploadProgressively() {
+        // Push every ~1 MINUTE of new coverage so a watch never loses its tail no matter where it ends. The
+        // worker is overwrite-wins, so each push just improves the stored set; capture is ~every 10s, so a
+        // minute is ~6 frames.
+        let perMinute = max(1, Int(60.0 / Self.captureInterval))
+        guard !communityAlreadyExists, CommunityTrickplay.isEnabled,
+              sessionFrames.count >= lastUploadedCount + perMinute,
+              let key = communityKey, let imdb = communityImdb else { return }
+        pushUpload(key: key, imdb: imdb)
+    }
+
+    /// Teardown flush: send the FULL session set if it grew since the last progressive push. No-op when
+    /// disabled / no key / the community already had a set / no new coverage since the last upload.
     func finishAndUploadIfNeeded(srcHeight: Int = 0) {
-        guard !didUpload, !communityAlreadyExists, CommunityTrickplay.isEnabled,
-              let key = communityKey, let imdb = communityImdb, sessionFrames.count >= 2 else { return }
-        didUpload = true
+        if srcHeight > 0 { communitySrcHeight = srcHeight }
+        guard !communityAlreadyExists, CommunityTrickplay.isEnabled,
+              let key = communityKey, let imdb = communityImdb,
+              sessionFrames.count >= 2, sessionFrames.count > lastUploadedCount else { return }
+        pushUpload(key: key, imdb: imdb)
+    }
+
+    /// Build + POST the current session frames off the main actor (fail-soft). Records the uploaded count so
+    /// the progressive throttle + teardown flush never re-send the same coverage. Logs the result so an empty
+    /// server table can be traced (capture vs key vs POST) from the device log.
+    private func pushUpload(key: String, imdb: String) {
+        lastUploadedCount = sessionFrames.count
         let frames = sessionFrames
         let season = communitySeason, episode = communityEpisode
-        let bucket = communityDurationBucket
-        let height = srcHeight > 0 ? srcHeight : communitySrcHeight
+        let bucket = communityDurationBucket, height = communitySrcHeight
         Task.detached(priority: .utility) {
-            _ = await CommunityTrickplay.buildAndUpload(
+            let ok = await CommunityTrickplay.buildAndUpload(
                 key: key, imdbId: imdb, season: season, episode: episode,
                 durationBucket: bucket, srcHeight: height,
                 intervalS: Self.captureInterval, frames: frames)
+            NSLog("[trickplay] upload key=%@ frames=%d -> %@", key, frames.count, ok ? "stored" : "failed")
         }
     }
 
